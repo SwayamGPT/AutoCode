@@ -128,6 +128,21 @@ describe("pipeline graph events", () => {
   });
 });
 
+describe("agent mode events", () => {
+  it("queues approvals until the user decides", () => {
+    let state = reducer(started(), {
+      type: "event",
+      event: event("approval_request", { id: "a1", tool: "git_push", summary: "Git push", args: "{}" }),
+    });
+    expect(state.approvals.map((a) => a.id)).toEqual(["a1"]);
+    state = reducer(state, { type: "event", event: event("approval_result", { id: "a1", tool: "git_push", approved: true }) });
+    expect(state.approvals).toEqual([]);
+    expect(state.log.at(-1)).toMatchObject({ text: "Approved: git_push", tone: "ok" });
+    state = reducer(state, { type: "event", event: event("tool_result", { tool: "git_push", ok: false, result: "rejected\nmore" }) });
+    expect(state.log.at(-1)).toMatchObject({ text: "  git_push failed: rejected", tone: "bad" });
+  });
+});
+
 describe("tree helpers", () => {
   it("nests paths with directories first", () => {
     const tree = buildTree(["z.py", "src/b.py", "src/a.py"]);

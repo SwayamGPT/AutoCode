@@ -325,3 +325,15 @@ button.danger { color: var(--del); }
 .examples button:hover { border-color: var(--accent); background: var(--accent-soft); }
 .shortcuts { font-size: 12px; margin-top: 20px; }
 kbd { font: 500 11px var(--code); padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--raised); color: var(--ink); }
+
+/* agent mode */
+.mode-switch { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.mode-switch button { padding: 3px 12px; font-size: 12px; }
+.mode-switch button[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.mode-switch .hint { margin-left: 6px; }
+.approvals { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--warn-bg); }
+.approval { display: flex; gap: 10px; align-items: flex-start; }
+.approval-text { flex: 1; min-width: 0; font-size: 13px; }
+.approval-text pre { font: 11.5px/1.5 var(--code); white-space: pre-wrap; margin: 4px 0 0; max-height: 140px; overflow: auto; }
+.approval-text summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.approval-actions { display: flex; gap: 6px; }

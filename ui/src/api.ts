@@ -4,6 +4,7 @@ import type {
   MemoryItem,
   ProviderInfo,
   PullProgress,
+  RunMode,
   RunSettings,
   RunSnapshot,
   RunSummary,
@@ -31,8 +32,10 @@ export const api = {
     ),
   runs: () => request<{ runs: RunSummary[] }>("/api/runs"),
   run: (id: string) => request<RunSnapshot>(`/api/runs/${id}`),
-  startRun: (requirement: string, workspace: string, settings: Partial<RunSettings>) =>
-    request<RunSummary>("/api/runs", { requirement, workspace, settings }),
+  startRun: (requirement: string, workspace: string, settings: Partial<RunSettings>, mode: RunMode = "generate") =>
+    request<RunSummary>("/api/runs", { requirement, workspace, settings, mode }),
+  approve: (runId: string, id: string, approved: boolean) =>
+    request<{ ok: boolean }>(`/api/runs/${runId}/approve`, { id, approved }),
   cancel: (id: string) => request<{ ok: boolean }>(`/api/runs/${id}/cancel`, {}),
   apply: (id: string, workspace: string) =>
     request<{ workspace: string; written: string[] }>(`/api/runs/${id}/apply`, { workspace }),

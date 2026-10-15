@@ -1,4 +1,12 @@
 export type RunStatus = "running" | "done" | "error" | "cancelled";
+export type RunMode = "generate" | "agent";
+
+export interface Approval {
+  id: string;
+  tool: string;
+  summary: string;
+  args: string;
+}
 
 export interface Issue {
   severity?: string;

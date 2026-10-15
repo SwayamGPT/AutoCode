@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api } from "./api";
 import { ApplyBar } from "./components/ApplyBar";
+import { ApprovalCards } from "./components/ApprovalCards";
 import { Composer } from "./components/Composer";
 import { Editor } from "./components/Editor";
 import { FileTree } from "./components/FileTree";
@@ -14,7 +15,7 @@ import { Timeline } from "./components/Timeline";
 import { TopBar } from "./components/TopBar";
 import { useRunStream } from "./hooks";
 import { initialState, reducer } from "./state/run";
-import type { Config, Health, PullProgress, RunSettings, RunSummary } from "./types";
+import type { Config, Health, PullProgress, RunMode, RunSettings, RunSummary } from "./types";
 
 const STATUS_LABELS = { running: "Working…", done: "Done", error: "Failed", cancelled: "Stopped" } as const;
 const PULL_POLL_MS = 1500;
@@ -102,10 +103,10 @@ export default function App() {
     if (path && !data.exists) setError("That folder does not exist yet. AutoCode will create it when you write files.");
   };
 
-  const startRun = (requirement: string, settings: Partial<RunSettings>) =>
+  const startRun = (requirement: string, settings: Partial<RunSettings>, mode: RunMode) =>
     guard(async () => {
       if (!requirement) throw new Error("Describe what to build first.");
-      const run = await api.startRun(requirement, state.workspace, settings);
+      const run = await api.startRun(requirement, state.workspace, settings, mode);
       dispatch({
         type: "runStarted",
         id: run.id,
@@ -225,6 +226,14 @@ export default function App() {
           />
           <ReviewerGauge personas={state.personas} reviews={state.reviews} passingScore={state.passingScore} />
           <Timeline log={state.log} startedAt={state.run?.startedAt} />
+          <ApprovalCards
+            approvals={state.approvals}
+            onDecide={(id, approved) =>
+              void guard(async () => {
+                if (state.run) await api.approve(state.run.id, id, approved);
+              })
+            }
+          />
           {state.run && status !== "running" && changed > 0 && (
             <ApplyBar count={changed} defaultPath={state.workspace} onApply={(path) => void apply(path)} />
           )}
@@ -234,7 +243,8 @@ export default function App() {
             requirement={requirement}
             onRequirement={setRequirement}
             inputRef={promptRef}
-            onRun={(text, settings) => void startRun(text, settings)}
+            hasWorkspace={Boolean(state.workspace)}
+            onRun={(text, settings, mode) => void startRun(text, settings, mode)}
             onCancel={() =>
               void guard(async () => {
                 if (!state.run) return;

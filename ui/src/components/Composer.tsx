@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
-import type { Config, RunSettings } from "../types";
+import type { Config, RunMode, RunSettings } from "../types";
 
 interface Props {
   config: Config | null;
   running: boolean;
-  onRun: (requirement: string, settings: Partial<RunSettings>) => void;
+  onRun: (requirement: string, settings: Partial<RunSettings>, mode: RunMode) => void;
+  hasWorkspace: boolean;
   onCancel: () => void;
   requirement: string;
   onRequirement: (text: string) => void;
@@ -25,8 +26,9 @@ function runDefaults(config: Config): Partial<RunSettings> {
 }
 
 /** The request box. Run options apply to this run only; everything else lives in Settings. */
-export function Composer({ config, running, onRun, onCancel, requirement, onRequirement, inputRef }: Props) {
+export function Composer({ config, running, onRun, onCancel, requirement, onRequirement, inputRef, hasWorkspace }: Props) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<RunMode>("generate");
   const [options, setOptions] = useState<Partial<RunSettings>>({});
   useEffect(() => {
     if (config) setOptions(runDefaults(config));
@@ -34,7 +36,7 @@ export function Composer({ config, running, onRun, onCancel, requirement, onRequ
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
-    onRun(requirement.trim(), options);
+    onRun(requirement.trim(), options, mode);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -45,6 +47,26 @@ export function Composer({ config, running, onRun, onCancel, requirement, onRequ
 
   return (
     <form className="composer" onSubmit={submit}>
+      <div className="mode-switch" role="radiogroup" aria-label="How AutoCode should work">
+        <button type="button" role="radio" aria-checked={mode === "generate"} onClick={() => setMode("generate")}>
+          Generate
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === "agent"}
+          onClick={() => setMode("agent")}
+          disabled={!hasWorkspace}
+          title={hasWorkspace ? "" : "Open a project folder to use the agent"}
+        >
+          Agent
+        </button>
+        <span className="hint">
+          {mode === "agent"
+            ? "Edits files, runs commands, git and GitHub in the open folder. Asks before risky steps."
+            : "Ten-dimension pipeline: you review the changes before writing them."}
+        </span>
+      </div>
       <textarea
         ref={inputRef}
         value={requirement}

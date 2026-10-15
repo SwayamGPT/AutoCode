@@ -1,4 +1,5 @@
 import type {
+  Approval,
   DimensionChange,
   DimensionPlan,
   Lesson,
@@ -29,6 +30,7 @@ export interface RunState {
   strategies: Record<string, string>; // dimension -> strategy chosen by the learning policy
   recalled: Record<string, string[]>; // dimension -> lessons recalled from memory
   learned: Lesson[]; // lessons written by the critic after the run
+  approvals: Approval[]; // agent actions waiting for the user
   node: string | null; // current LangGraph node
   visited: string[];
   iteration: number;
@@ -65,6 +67,7 @@ export const initialState: RunState = {
   strategies: {},
   recalled: {},
   learned: [],
+  approvals: [],
   node: null,
   visited: [],
   iteration: 0,
@@ -88,6 +91,11 @@ export const EVENT_KINDS = [
   "patches",
   "verify",
   "fix",
+  "tool_call",
+  "tool_result",
+  "approval_request",
+  "approval_result",
+  "agent_final",
   "memory_recall",
   "strategy",
   "learning",
@@ -119,6 +127,7 @@ function freshRun(state: RunState, id: string, startedAt: number): RunState {
     strategies: {},
     recalled: {},
     learned: [],
+    approvals: [],
     node: null,
     visited: [],
     iteration: 0,
@@ -216,6 +225,25 @@ function applyEvent(state: RunState, event: RunEvent): RunState {
         .join("\n\n");
       return { ...log(text, "muted", detail ? { detail } : {}), recalled: lessons };
     }
+    case "tool_call":
+      return log(`${data.tool}${data.thought ? `: ${data.thought}` : ""}`, "plain", { detail: String(data.args) });
+    case "tool_result": {
+      const result = String(data.result);
+      const firstLine = result.split("\n")[0].slice(0, 120);
+      return log(data.ok ? `  ${firstLine}` : `  ${data.tool} failed: ${firstLine}`, data.ok ? "muted" : "bad", {
+        detail: result,
+      });
+    }
+    case "approval_request": {
+      const approval = data as unknown as Approval;
+      return { ...log(`Waiting for you: ${approval.summary}`, "plain"), approvals: [...state.approvals, approval] };
+    }
+    case "approval_result": {
+      const next = log(`${data.approved ? "Approved" : "Declined"}: ${data.tool}`, data.approved ? "ok" : "bad");
+      return { ...next, approvals: state.approvals.filter((a) => a.id !== data.id) };
+    }
+    case "agent_final":
+      return log(String(data.message), "ok");
     case "node": {
       const node = String(data.node);
       const visited = state.visited.includes(node) ? state.visited : [...state.visited, node];
