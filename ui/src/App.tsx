@@ -1,0 +1,153 @@
+import { useCallback, useEffect, useReducer, useState } from "react";
+import { api } from "./api";
+import { ApplyBar } from "./components/ApplyBar";
+import { Composer } from "./components/Composer";
+import { Editor } from "./components/Editor";
+import { FileTree } from "./components/FileTree";
+import { ReviewerGauge } from "./components/ReviewerGauge";
+import { SetupBanner } from "./components/SetupBanner";
+import { Timeline } from "./components/Timeline";
+import { TopBar } from "./components/TopBar";
+import { useRunStream } from "./hooks";
+import { initialState, reducer } from "./state/run";
+import type { Config, Health, RunSummary, Settings } from "./types";
+
+const STATUS_LABELS = { running: "Working…", done: "Done", error: "Failed", cancelled: "Stopped" } as const;
+
+export default function App() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [config, setConfig] = useState<Config | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [error, setError] = useState("");
+
+  const guard = useCallback(async (action: () => Promise<void>) => {
+    setError("");
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const refreshRuns = useCallback(() => {
+    void guard(async () => setRuns((await api.runs()).runs));
+  }, [guard]);
+
+  const checkHealth = useCallback(() => {
+    void guard(async () => setHealth(await api.health()));
+  }, [guard]);
+
+  useEffect(() => {
+    void guard(async () => {
+      const { config: loaded, personas } = await api.config();
+      setConfig(loaded);
+      dispatch({ type: "config", personas, passingScore: loaded.passing_score });
+    });
+    checkHealth();
+    refreshRuns();
+  }, [guard, checkHealth, refreshRuns]);
+
+  useRunStream(state.run?.id, dispatch, refreshRuns);
+
+  const openWorkspace = async (path: string) => {
+    const data = await api.workspace(path);
+    dispatch({ type: "workspace", path, files: data.files });
+    if (path && !data.exists) setError("That folder does not exist yet. AutoCode will create it when you write files.");
+  };
+
+  const startRun = (requirement: string, settings: Settings) =>
+    guard(async () => {
+      if (!requirement) throw new Error("Describe what to build first.");
+      const run = await api.startRun(requirement, state.workspace, settings);
+      dispatch({
+        type: "runStarted",
+        id: run.id,
+        startedAt: run.created_at,
+        requirement,
+        passingScore: Number(settings.passing_score ?? config?.passing_score ?? 85),
+      });
+      refreshRuns();
+    });
+
+  const openRun = (id: string) =>
+    guard(async () => {
+      if (!id) return;
+      dispatch({ type: "runOpened", snapshot: await api.run(id) });
+    });
+
+  const apply = (path: string) =>
+    guard(async () => {
+      if (!state.run) return;
+      if (!path) throw new Error("Choose a folder to write the files to.");
+      const result = await api.apply(state.run.id, path);
+      dispatch({ type: "note", text: `Wrote ${result.written.length} files to ${result.workspace}`, tone: "ok" });
+    });
+
+  const status = state.run?.status;
+  const changed = Object.keys(state.diffs).length;
+  const model = config ? `${config.model} on ${config.ollama_host.replace(/^https?:\/\//, "")}` : "";
+
+  return (
+    <>
+      <TopBar workspace={state.workspace} model={model} onOpen={(path) => void guard(() => openWorkspace(path))} />
+      {health && config && <SetupBanner health={health} model={config.model} onRetry={checkHealth} />}
+      <main className="main">
+        <FileTree
+          files={state.files}
+          diffs={state.diffs}
+          originalPaths={state.originalPaths}
+          selected={state.selected}
+          onSelect={(path) => dispatch({ type: "select", path })}
+        />
+        <Editor
+          path={state.selected}
+          content={state.selected ? state.files[state.selected] : undefined}
+          diff={state.selected ? state.diffs[state.selected] : undefined}
+          view={state.view}
+          onView={(view) => dispatch({ type: "view", view })}
+        />
+        <section className="pane agent" aria-label="Agent">
+          <div className="pane-head">
+            <label className="runs">
+              Run
+              <select value={state.run?.id ?? ""} onChange={(e) => void openRun(e.target.value)}>
+                <option value="">New run</option>
+                {runs.map((run) => (
+                  <option key={run.id} value={run.id}>
+                    {run.requirement.slice(0, 48)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className={`state ${status ?? ""}`} role="status">
+              {status ? STATUS_LABELS[status] : ""}
+            </span>
+          </div>
+          <ReviewerGauge personas={state.personas} reviews={state.reviews} passingScore={state.passingScore} />
+          <Timeline log={state.log} startedAt={state.run?.startedAt} />
+          {state.run && status !== "running" && changed > 0 && (
+            <ApplyBar count={changed} defaultPath={state.workspace} onApply={(path) => void apply(path)} />
+          )}
+          <Composer
+            config={config}
+            running={status === "running"}
+            onRun={(requirement, settings) => void startRun(requirement, settings)}
+            onCancel={() =>
+              void guard(async () => {
+                if (!state.run) return;
+                await api.cancel(state.run.id);
+                dispatch({ type: "note", text: "Stopping after the current model call…", tone: "muted" });
+              })
+            }
+          />
+          {error && (
+            <div className="error-text" role="alert">
+              {error}
+            </div>
+          )}
+        </section>
+      </main>
+    </>
+  );
+}
