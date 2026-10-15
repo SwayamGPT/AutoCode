@@ -44,6 +44,52 @@ requirement
 
 The Plan tab in the app shows all ten steps live: what each dimension planned, what it changed, and how it scored.
 
+### The pipeline graph (LangGraph)
+
+The control flow is a [LangGraph](https://github.com/langchain-ai/langgraph) `StateGraph` (`agent_platform/graph.py`). It covers the fast-mode skip, the fix branch when tests fail, and the review and patch loop that stops on a pass or at the round limit. Each node is one step method on the orchestrator. Every transition is streamed to the app, so the pipeline stepper above the reviewer scores shows the current node and round. The diagram below is generated from the compiled graph with `python -c "from agent_platform.graph import pipeline_diagram; print(pipeline_diagram())"`.
+
+```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	recall(recall)
+	context(context)
+	plan(plan)
+	build(build)
+	implement(implement)
+	verify(verify)
+	fix(fix)
+	review(review)
+	patch(patch)
+	finish(finish)
+	learn(learn)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> recall;
+	build -.-> implement;
+	build -.-> verify;
+	context --> plan;
+	finish --> learn;
+	fix --> review;
+	implement --> verify;
+	patch --> verify;
+	plan --> build;
+	recall --> context;
+	review -.-> finish;
+	review -.-> patch;
+	verify -.-> fix;
+	verify -.-> review;
+	learn --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+```
+
+LangChain itself is not used. The provider layer already covers local and hosted models with JSON mode, retries, per-call metrics, and cancellation, so adding LangChain's model wrappers would mean more dependencies for no new capability.
+
 ## Desktop app
 
 Download or build `AutoCode.dmg` (macOS) or the `AutoCode` folder (Windows/Linux) and open it. The app runs its backend on a private loopback port and shows the UI in a native window (WKWebView, WebView2, or WebKitGTK).
@@ -189,7 +235,8 @@ AutoCode/
 ├── app.py                    # Entry point
 ├── agent_platform/
 │   ├── cli.py                # CLI + subcommands: desktop, serve, mcp
-│   ├── orchestrator.py       # context → plan → 10-step plan → build per dimension → review loop
+│   ├── orchestrator.py       # Step methods: plan, build, implement, verify, fix, review, patch
+│   ├── graph.py              # LangGraph state machine wiring the steps together
 │   ├── personas.py           # the ten dimensions (definitions, checklists, weights)
 │   ├── dimensions.py         # per-dimension planner and implementer
 │   ├── planner.py / generator.py / reviewer.py / retriever.py
