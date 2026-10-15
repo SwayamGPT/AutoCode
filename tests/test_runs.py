@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -78,3 +79,16 @@ def test_llm_metrics_are_aggregated() -> None:
     run.emit("llm_done", {"label": "Security", "seconds": 0.5, "prompt_tokens": 50, "output_tokens": 5})
     assert run.metrics == {"llm_calls": 2, "prompt_tokens": 150, "output_tokens": 25, "llm_seconds": 2.0}
     assert run.events[-1]["data"]["totals"] == run.metrics
+
+
+def test_ui_subscribes_to_every_event_kind_the_backend_emits(tmp_path: Path) -> None:
+    source = (Path(__file__).resolve().parents[1] / "ui" / "src" / "state" / "run.ts").read_text()
+    block = source.split("export const EVENT_KINDS = [", 1)[1].split("]", 1)[0]
+    subscribed = set(re.findall(r'"([a-z_]+)"', block))
+
+    run = Run("adder", "", config_from_env(), files={})
+    run.execute()
+    run.emit("llm_done", {"label": "Planner", "seconds": 1, "prompt_tokens": 1, "output_tokens": 1})
+    run.emit("mcp_call", {"server": "s", "tool": "t", "arguments": {}, "ok": True, "result": ""})
+    emitted = {event["kind"] for event in run.events}
+    assert emitted - subscribed == set()
