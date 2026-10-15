@@ -67,3 +67,7 @@ There is no formatter config; `ruff check agent_platform tests --select F,E9,B` 
 ## Environment settings
 
 `config.py` loads `./.env` then `AUTOCODE_HOME/.env` at import time (`setdefault`, so real env vars win), before anything reads the environment; `agent_platform/__init__` importing anything pulls it in. Module-level limits use `setting("NAME", default)`, which casts to the default's type (bools via `parse_bool`) and treats empty values as unset. When adding a tunable, use `setting(...)` and document it in `.env.example` (grouped by area). Preset base URLs can be overridden with `<NAME>_BASE_URL`.
+
+## Agent mode
+
+`tools.py` (`ToolKit`, `TOOLS` with levels read/write/risky) + `tool_agent.py` (`ToolAgent`, JSON action loop, transcript trimmed to `AGENT_TRANSCRIPT_CHARS`). Run mode `"agent"` (`Run.execute_agent`) uses the coder model; risky tools call `Run.request_approval`, which emits `approval_request` and blocks until `POST /api/runs/<id>/approve {id, approved}` (or cancel). File-changing tools trigger a `files` event from disk. GitHub calls go to `GITHUB_API_URL` with `GITHUB_TOKEN`; tests point it at a fake server and use a local bare repo as `origin`. CLI: `python app.py agent "task" --workspace DIR`.

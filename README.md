@@ -184,6 +184,24 @@ Every option can be set in `.env` (copy `.env.example`; it documents about 60 se
 - The HTTP server binds to `127.0.0.1` by default. It rejects cross-origin writes and foreign `Host` headers (DNS rebinding). It has no authentication, so do not expose it to a network.
 - Patch and write paths are confined to the project folder (no absolute paths or `..`).
 
+## Agent mode (tools, git, GitHub)
+
+Switch the request box to **Agent** with a project folder open, then ask for things like "fix the failing test and commit it" or "add a /health endpoint on a new branch, push it and open a pull request". The agent works the way Claude Code does. It explores the project, reads files, edits them, runs commands, and repeats until the task is done, showing each step in the timeline.
+
+| Tools | |
+|---|---|
+| Files | `list_files`, `read_file`, `search`, `write_file`, `edit_file` (exact snippet replace), `delete_file` |
+| Shell | `run_command` (tests, builds, linters) |
+| Git | `git_status`, `git_diff`, `git_log`, `git_branch`, `git_commit`, `git_pull` (fast-forward only), `git_push` |
+| GitHub | `github_repo`, `github_list_issues`, `github_get_issue`, `github_list_prs`, `github_create_pr`, `github_comment` |
+
+How it stays safe:
+- Every path is confined to the project folder, and `.git` is only touched through the git tools.
+- Shell commands, commits, pushes, pulls, deletes, and GitHub writes wait for your **Allow** or **Deny** (`AGENT_APPROVAL=ask`). Reads and in-folder edits run straight away, and every edit shows up in **Changes**.
+- `AGENT_APPROVAL=read_only` limits the agent to reading. `auto` never asks.
+
+GitHub tools need `GITHUB_TOKEN`. `git push` and `git pull` use your normal git credentials. From a terminal, run `python app.py agent "your task" --workspace path/to/project`, which asks for approvals in the terminal. The loop is plain JSON, so it works with any model, including free hosted ones without native tool calling.
+
 ## Memory and learning
 
 AutoCode improves with use without retraining any model:
