@@ -38,8 +38,9 @@ class RpcError(Exception):
 def agent_card(base_url: str) -> dict[str, Any]:
     return {
         "name": "AutoCode",
-        "description": "Local multi-agent code generator: plans, writes, reviews with ten weighted personas, "
-        "patches, and runs tests until the code passes.",
+        "description": "Local multi-agent code generator: plans in ten steps (one per quality dimension, from "
+        "business logic to observability), makes per-dimension code changes, then reviews, patches and tests "
+        "until the code passes.",
         "version": "1.0.0",
         "supportedInterfaces": [
             {"url": base_url + A2A_PATH, "protocolBinding": "JSONRPC", "protocolVersion": A2A_PROTOCOL_VERSION}
