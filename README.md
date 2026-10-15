@@ -4,23 +4,45 @@ AutoCode is a multi-agent, self-verifying code generator that runs entirely agai
 
 It ships as an **installable desktop app** (a native window, not a website), a CLI, an **MCP server** that Claude Code or Cursor can call, and an **A2A agent** that other agents can delegate to.
 
-## Architecture
+## The ten quality dimensions
 
-AutoCode is a pipeline of specialized agents:
+Every run plans, builds, and checks the code along ten dimensions, in this order:
 
-1. **Context Agent**: if MCP servers are configured, it picks up to three tool calls (docs, issues, schemas) and passes the results to the planner and generator.
-2. **Planner Agent**: turns the requirement into a plan (files, structure, test command). With an existing project, it plans a change instead of a rewrite.
-3. **Generator Agent**: writes the files. In edit mode, it sees the relevant existing files and returns only what changed.
-4. **Review Coordinator**: runs **10 weighted expert personas** in parallel (Business Logic, Security, UI/UX, Performance, Reliability & Availability, Maintainability, Scalability, Data Management, Testing & QA, Observability). Each persona scores against weighted sub-criteria and returns unified-diff patches. **A2A peers**, such as a second AutoCode on a different model, join as extra reviewers.
-5. **Patch Engine**: applies reviewer patches with `git apply` in a scratch repo and records which ones failed.
-6. **Validator**: runs the plan's test command (or a compile check) in a temp dir. Failures feed into the next iteration.
-7. **Memory Manager**: carries findings across iterations, so later reviewers build on earlier ones.
+| # | Dimension | What it covers |
+|---|---|---|
+| 1 | Business Logic | The core functionality and rules that solve the user's problem |
+| 2 | Security | Authentication, authorization, encryption, input validation, and protection against vulnerabilities |
+| 3 | UI/UX | How users interact with the application and how intuitive and pleasant it is to use |
+| 4 | Performance | Fast response times, efficient resource usage, and scalability under load |
+| 5 | Reliability & Availability | The system works consistently, handles failures gracefully, and has high uptime |
+| 6 | Maintainability | Clean, modular, well-documented code that is easy to update and debug |
+| 7 | Scalability | Handling more users, data, and traffic without major redesign |
+| 8 | Data Management | Efficient database design, data integrity, backups, and consistency |
+| 9 | Testing & Quality Assurance | Unit, integration, and end-to-end tests, code reviews, and CI/CD |
+| 10 | Observability & Monitoring | Logging, metrics, tracing, and alerting to detect and diagnose production issues |
+
+## Pipeline
 
 ```
-requirement → [context via MCP] → plan → generate → [review (10 personas + A2A peers) → patch → validate] → repeat until:
-    - every reviewer passes AND validation succeeds, or
-    - max_iterations is reached
+requirement
+  → context      MCP tools (optional)
+  → base plan    files, architecture, test command
+  → 10-step plan one step per dimension, each seeing the decisions of the steps before it
+  → build        step 1 builds the Business Logic foundation; steps 2–10 each make their own code changes
+  → review loop  validate → 10 dimension reviewers (+ A2A peers) score against their own plan → patch
+                 repeat until every reviewer passes and validation succeeds, or max_iterations is reached
 ```
+
+1. **Context Agent**: if MCP servers are configured, it picks up to three tool calls (docs, issues, schemas) and passes the results on.
+2. **Planner**: turns the requirement into a base plan. With an existing project, it plans a change instead of a rewrite.
+3. **Dimension Planner (10 steps)**: each dimension writes its own plan: requirements, design decisions, files to touch, and acceptance checks that a reviewer can confirm in the code. A dimension that does not fit the project (for example, Data Management for a CLI with no storage) says so and gives a reason. If a planning call fails, the step falls back to the dimension's checklist so the run continues.
+4. **Generator, then Dimension Implementers**: the generator builds the Business Logic foundation. Then each applicable dimension, from Security to Observability, changes the code for its own plan on top of the earlier steps. Not-applicable dimensions are skipped. **Fast mode** (`--fast`, `FAST_MODE=true`) does a single generation pass instead.
+5. **Validator**: runs the plan's test command (or a compile check) before each review round, so reviewers see test failures.
+6. **Dimension Reviewers**: the same ten dimensions score the code in parallel against their own acceptance checks and weighted criteria, and propose unified-diff patches. **A2A peers** join as extra reviewers.
+7. **Patch Engine**: applies the patches with `git apply`. Patches that fail feed back into memory.
+8. **Result**: if every gate passes, the run returns that version. Otherwise it returns the best reviewed version (passing first, then verified, then the highest average score), not just the last one.
+
+The Plan tab in the app shows all ten steps live: what each dimension planned, what it changed, and how it scored.
 
 ## Desktop app
 
@@ -36,7 +58,19 @@ Build it yourself:
 ./scripts/build_desktop.sh          # macOS: dist/AutoCode.app + dist/AutoCode.dmg; Linux/Windows: dist/AutoCode/
 ```
 
-Requirements on the user's machine: [Ollama](https://ollama.com) with the model pulled (`ollama pull qwen3:4b`) and Git. Settings for the packaged app live in `~/.autocode/.env` (same keys as `.env.example`), and MCP servers in `~/.autocode/mcp.json`. Crashes are logged to `~/.autocode/desktop.log`.
+Requirements on the user's machine: [Ollama](https://ollama.com) with the model pulled (`ollama pull qwen3:4b`) and Git.
+
+Everything AutoCode keeps lives in `~/.autocode/` (or `$AUTOCODE_HOME`):
+
+| Path | Contents |
+|---|---|
+| `.env` | Settings (same keys as `.env.example`) |
+| `mcp.json` | MCP servers for the context agent |
+| `runs/<id>.json` | Run history (the last 50 runs; only changed files are stored; written atomically) |
+| `logs/autocode.log` | Rotating log of run lifecycle, per-call model latency and tokens, failures, and HTTP requests |
+| `desktop.log` | Crash traceback from the desktop window |
+
+A full run makes about 1 + 10 + 10 model calls before reviewing, plus 10 per review round. The app header shows calls and tokens as the run progresses. Use fast mode on slow hardware.
 
 ## Running from source
 
@@ -96,6 +130,7 @@ Every option can be set with an environment variable (see `.env.example`), a CLI
 | `--command-timeout-seconds` | Timeout for validation commands and MCP calls |
 | `--mcp-config` | MCP servers file for the context agent |
 | `--a2a-peers` | Comma-separated A2A agent URLs used as extra reviewers |
+| `--fast` | One generation pass instead of ten per-dimension implementation passes |
 
 ## Security notes
 
@@ -118,6 +153,8 @@ python -m pytest           # backend, MCP, A2A, HTTP API (uses a scripted fake L
 npm --prefix ui test       # UI state reducer
 ```
 
+GitHub Actions (`.github/workflows/ci.yml`) runs ruff and pytest on Python 3.11 and 3.13, then the UI typecheck, tests, and build.
+
 ## Project structure
 
 ```
@@ -125,12 +162,15 @@ AutoCode/
 ├── app.py                    # Entry point
 ├── agent_platform/
 │   ├── cli.py                # CLI + subcommands: desktop, serve, mcp
-│   ├── orchestrator.py       # context → plan → generate → review → patch → validate loop
-│   ├── planner.py / generator.py / reviewer.py / personas.py / retriever.py
+│   ├── orchestrator.py       # context → plan → 10-step plan → build per dimension → review loop
+│   ├── personas.py           # the ten dimensions (definitions, checklists, weights)
+│   ├── dimensions.py         # per-dimension planner and implementer
+│   ├── planner.py / generator.py / reviewer.py / retriever.py
 │   ├── context_agent.py      # MCP tool selection before planning
 │   ├── patch_engine.py / validator.py / memory.py / workspace.py
 │   ├── llm.py                # Ollama client (JSON mode, retry, cancellation)
-│   ├── runs.py               # Background runs + event log
+│   ├── runs.py               # Background runs, event log, metrics, saved history
+│   ├── logs.py               # Rotating file log
 │   ├── server.py             # HTTP API, SSE events, static UI, A2A routes
 │   ├── a2a.py / a2a_client.py
 │   ├── mcp_server.py / mcp_client.py
