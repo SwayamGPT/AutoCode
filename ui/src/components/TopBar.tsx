@@ -6,9 +6,10 @@ interface Props {
   workspace: string;
   model: string;
   onOpen: (path: string) => void;
+  onOpenSettings: () => void;
 }
 
-export function TopBar({ workspace, model, onOpen }: Props) {
+export function TopBar({ workspace, model, onOpen, onOpenSettings }: Props) {
   const [path, setPath] = useState(workspace);
   const canBrowse = useDesktopBridge();
   useEffect(() => {
@@ -50,6 +51,9 @@ export function TopBar({ workspace, model, onOpen }: Props) {
         <button type="submit">Open</button>
       </form>
       <div className="model">{model}</div>
+      <button type="button" onClick={onOpenSettings}>
+        Settings
+      </button>
     </header>
   );
 }

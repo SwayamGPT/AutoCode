@@ -1,4 +1,15 @@
-import type { Config, Health, RunSnapshot, RunSummary, Settings } from "./types";
+import type {
+  Config,
+  Health,
+  MemoryItem,
+  ProviderInfo,
+  PullProgress,
+  RunSettings,
+  RunSnapshot,
+  RunSummary,
+  Settings,
+  StrategyStat,
+} from "./types";
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const init: RequestInit =
@@ -20,12 +31,26 @@ export const api = {
     ),
   runs: () => request<{ runs: RunSummary[] }>("/api/runs"),
   run: (id: string) => request<RunSnapshot>(`/api/runs/${id}`),
-  startRun: (requirement: string, workspace: string, settings: Settings) =>
+  startRun: (requirement: string, workspace: string, settings: Partial<RunSettings>) =>
     request<RunSummary>("/api/runs", { requirement, workspace, settings }),
   cancel: (id: string) => request<{ ok: boolean }>(`/api/runs/${id}/cancel`, {}),
   apply: (id: string, workspace: string) =>
     request<{ workspace: string; written: string[] }>(`/api/runs/${id}/apply`, { workspace }),
   events: (id: string) => new EventSource(`/api/runs/${id}/events`),
+  settings: () => request<{ config: Config; providers: Record<string, ProviderInfo>; path: string }>("/api/settings"),
+  saveSettings: (updates: Settings) =>
+    request<{ config: Config; providers: Record<string, ProviderInfo>; path: string }>("/api/settings", updates),
+  models: (provider: string) => request<{ models: string[] }>(`/api/models?provider=${encodeURIComponent(provider)}`),
+  pull: (model: string) => request<PullProgress>("/api/models/pull", { model }),
+  pulls: () => request<{ pulls: PullProgress[] }>("/api/models/pull"),
+  memory: (q = "", limit = 100) =>
+    request<{ backend: string; count: number; items: MemoryItem[] }>(
+      `/api/memory?limit=${limit}&q=${encodeURIComponent(q)}`,
+    ),
+  deleteMemory: (id: number) => request<{ ok: boolean }>("/api/memory/delete", { id }),
+  clearMemory: () => request<{ ok: boolean }>("/api/memory/clear", {}),
+  learning: () =>
+    request<{ backend: string; strategies: Record<string, string>; stats: StrategyStat[] }>("/api/learning"),
 };
 
 // Native folder picker, available only inside the desktop window (pywebview js_api).

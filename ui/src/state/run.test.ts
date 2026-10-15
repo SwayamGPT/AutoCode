@@ -91,6 +91,31 @@ describe("ten-step dimension pipeline", () => {
   });
 });
 
+describe("memory and learning events", () => {
+  it("records recalled lessons, chosen strategies, fixes and new lessons", () => {
+    let state = reducer(started(), {
+      type: "event",
+      event: event("memory_recall", { backend: "postgres", total: 1, lessons: { Security: ["[plan] Rate-limit login."] } }),
+    });
+    expect(state.recalled.Security).toEqual(["[plan] Rate-limit login."]);
+    expect(state.log.at(-1)?.text).toBe("Recalled 1 lessons from similar past tasks");
+
+    state = reducer(state, { type: "event", event: event("strategy", { dimension: "Security", strategy: "thorough" }) });
+    expect(state.strategies).toEqual({ Security: "thorough" });
+
+    state = reducer(state, {
+      type: "event",
+      event: event("fix", { diagnosis: "Missing import.", changed: ["app.py"], verified: true }),
+    });
+    expect(state.log.at(-1)).toMatchObject({ text: "Fixer: Missing import. (fixed)", tone: "ok" });
+
+    const lessons = [{ dimension: "Security", step: "plan", lesson: "Plan rate limits." }];
+    state = reducer(state, { type: "event", event: event("reflection", { summary: "ok", lessons, stored: 2 }) });
+    expect(state.learned).toEqual(lessons);
+    expect(state.log.at(-1)?.text).toBe("Learned 1 lessons for next time");
+  });
+});
+
 describe("tree helpers", () => {
   it("nests paths with directories first", () => {
     const tree = buildTree(["z.py", "src/b.py", "src/a.py"]);

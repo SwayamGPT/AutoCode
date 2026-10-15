@@ -64,15 +64,85 @@ export interface Config {
   mcp_config: string;
   a2a_peers: string;
   fast_mode: boolean;
+  providers_json: string;
+  planner_model: string;
+  coder_model: string;
+  reviewer_model: string;
+  critic_model: string;
+  embedding_model: string;
+  database_url: string;
+  learning: boolean;
+  ollama_request_timeout_seconds: number;
+}
+
+/** Fields a single run may override; the rest change only through saved settings. */
+export type RunSettings = Pick<
+  Config,
+  "temperature" | "max_iterations" | "passing_score" | "num_ctx" | "max_retrieved_files" | "skip_verify" | "fast_mode"
+>;
+
+export interface ProviderInfo {
+  type: string;
+  base_url: string;
+  example: string;
+  key_env: string;
+  has_key: boolean;
+}
+
+export interface ModelStatus {
+  spec: string;
+  provider: string;
+  model: string;
+  ok: boolean;
+  message: string;
+  pullable: boolean;
+  roles?: string[];
+}
+
+export interface PullProgress {
+  spec: string;
+  status: string;
+  completed: number;
+  total: number;
+  done: boolean;
+  error: string;
+}
+
+export interface MemoryItem {
+  id: number;
+  kind: string;
+  dimension: string;
+  step: string;
+  content: string;
+  requirement: string;
+  score: number | null;
+  created_at: string;
+  similarity: number;
+}
+
+export interface StrategyStat {
+  dimension: string;
+  arm: string;
+  pulls: number;
+  mean_reward: number | null;
+  expected: number;
 }
 
 export type Settings = Partial<Config>;
 
+export interface Lesson {
+  dimension: string;
+  step: string;
+  lesson: string;
+}
+
 export interface Health {
-  ollama: boolean;
-  model: boolean;
+  ok: boolean;
   git: boolean;
-  message: string;
+  models: ModelStatus[];
+  embedding: ModelStatus | null;
+  memory: { backend: string; count: number; ok: boolean; message?: string };
+  learning: boolean;
 }
 
 export interface RunSummary {

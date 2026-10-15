@@ -7,6 +7,8 @@ interface Props {
   changes: Record<string, DimensionChange>;
   reviews: Record<string, Review>;
   passingScore: number;
+  strategies: Record<string, string>;
+  recalled: Record<string, string[]>;
   onOpenFile: (path: string) => void;
 }
 
@@ -33,7 +35,7 @@ function Items({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-export function PlanView({ personas, plans, changes, reviews, passingScore, onOpenFile }: Props) {
+export function PlanView({ personas, plans, changes, reviews, passingScore, strategies, recalled, onOpenFile }: Props) {
   // Peers (A2A) review but do not plan, so only the ten local dimensions are listed.
   const dimensions = personas.filter((name) => !name.startsWith("Peer "));
   if (!plans.length) {
@@ -55,6 +57,11 @@ export function PlanView({ personas, plans, changes, reviews, passingScore, onOp
             <div className="dim-head">
               <span className="dim-step">{index + 1}</span>
               <h3>{name}</h3>
+              {strategies[name] && (
+                <span className="dim-strategy" title="Chosen by the learning policy for this dimension">
+                  {strategies[name].replace("_", " ")} approach
+                </span>
+              )}
               <span className={`dim-stage ${stage.tone}`}>{stage.label}</span>
             </div>
             {plan && !plan.applicable && <p className="dim-reason">{plan.reason}</p>}
@@ -64,6 +71,7 @@ export function PlanView({ personas, plans, changes, reviews, passingScore, onOp
                 <Items title="Requirements" items={plan.requirements} />
                 <Items title="Decisions" items={plan.decisions} />
                 <Items title="Acceptance checks" items={plan.acceptance_checks} />
+                <Items title="Remembered from past runs" items={recalled[name] ?? []} />
                 {plan.files.length > 0 && (
                   <div className="dim-section">
                     <h4>Files</h4>

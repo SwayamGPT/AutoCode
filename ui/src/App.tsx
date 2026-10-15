@@ -4,16 +4,19 @@ import { ApplyBar } from "./components/ApplyBar";
 import { Composer } from "./components/Composer";
 import { Editor } from "./components/Editor";
 import { FileTree } from "./components/FileTree";
+import { MemoryView } from "./components/MemoryView";
 import { PlanView } from "./components/PlanView";
 import { ReviewerGauge } from "./components/ReviewerGauge";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { SetupBanner } from "./components/SetupBanner";
 import { Timeline } from "./components/Timeline";
 import { TopBar } from "./components/TopBar";
 import { useRunStream } from "./hooks";
 import { initialState, reducer } from "./state/run";
-import type { Config, Health, RunSummary, Settings } from "./types";
+import type { Config, Health, PullProgress, RunSettings, RunSummary } from "./types";
 
 const STATUS_LABELS = { running: "Working…", done: "Done", error: "Failed", cancelled: "Stopped" } as const;
+const PULL_POLL_MS = 1500;
 
 function formatTokens(count: number): string {
   return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
@@ -23,7 +26,9 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [config, setConfig] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [pulls, setPulls] = useState<PullProgress[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState("");
 
   const guard = useCallback(async (action: () => Promise<void>) => {
@@ -43,15 +48,32 @@ export default function App() {
     void guard(async () => setHealth(await api.health()));
   }, [guard]);
 
-  useEffect(() => {
+  const loadConfig = useCallback(() => {
     void guard(async () => {
       const { config: loaded, personas } = await api.config();
       setConfig(loaded);
       dispatch({ type: "config", personas, passingScore: loaded.passing_score });
     });
+  }, [guard]);
+
+  useEffect(() => {
+    loadConfig();
     checkHealth();
     refreshRuns();
-  }, [guard, checkHealth, refreshRuns]);
+  }, [loadConfig, checkHealth, refreshRuns]);
+
+  // Poll model downloads while any is in progress; re-check health when they finish.
+  const downloading = pulls.some((pull) => !pull.done);
+  useEffect(() => {
+    if (!downloading) return;
+    const timer = window.setInterval(() => {
+      void api.pulls().then(({ pulls: latest }) => {
+        setPulls(latest);
+        if (latest.every((pull) => pull.done)) checkHealth();
+      });
+    }, PULL_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [downloading, checkHealth]);
 
   useRunStream(state.run?.id, dispatch, refreshRuns);
 
@@ -61,7 +83,7 @@ export default function App() {
     if (path && !data.exists) setError("That folder does not exist yet. AutoCode will create it when you write files.");
   };
 
-  const startRun = (requirement: string, settings: Settings) =>
+  const startRun = (requirement: string, settings: Partial<RunSettings>) =>
     guard(async () => {
       if (!requirement) throw new Error("Describe what to build first.");
       const run = await api.startRun(requirement, state.workspace, settings);
@@ -89,14 +111,33 @@ export default function App() {
       dispatch({ type: "note", text: `Wrote ${result.written.length} files to ${result.workspace}`, tone: "ok" });
     });
 
+  const pull = (spec: string) =>
+    guard(async () => {
+      const started = await api.pull(spec);
+      setPulls((current) => [...current.filter((p) => p.spec !== spec), started]);
+    });
+
   const status = state.run?.status;
   const changed = Object.keys(state.diffs).length;
-  const model = config ? `${config.model} on ${config.ollama_host.replace(/^https?:\/\//, "")}` : "";
+  const model = config?.model ?? "";
 
   return (
     <>
-      <TopBar workspace={state.workspace} model={model} onOpen={(path) => void guard(() => openWorkspace(path))} />
-      {health && config && <SetupBanner health={health} model={config.model} onRetry={checkHealth} />}
+      <TopBar
+        workspace={state.workspace}
+        model={model}
+        onOpen={(path) => void guard(() => openWorkspace(path))}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      {health && (
+        <SetupBanner
+          health={health}
+          pulls={pulls}
+          onRetry={checkHealth}
+          onPull={(spec) => void pull(spec)}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      )}
       <main className="main">
         <FileTree
           files={state.files}
@@ -118,7 +159,15 @@ export default function App() {
               changes={state.dimensionChanges}
               reviews={state.reviews}
               passingScore={state.passingScore}
+              strategies={state.strategies}
+              recalled={state.recalled}
               onOpenFile={(path) => dispatch({ type: "select", path })}
+            />
+          }
+          memoryView={
+            <MemoryView
+              dimensions={state.personas.filter((name) => !name.startsWith("Peer "))}
+              refreshKey={`${state.run?.id ?? ""}:${status ?? ""}`}
             />
           }
         />
@@ -168,6 +217,14 @@ export default function App() {
           )}
         </section>
       </main>
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={() => {
+          loadConfig();
+          checkHealth();
+        }}
+      />
     </>
   );
 }

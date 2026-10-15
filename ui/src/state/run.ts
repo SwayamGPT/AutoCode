@@ -1,4 +1,16 @@
-import type { DimensionChange, DimensionPlan, LogEntry, Metrics, Plan, Review, RunEvent, RunSnapshot, RunStatus, Tone } from "../types";
+import type {
+  DimensionChange,
+  DimensionPlan,
+  Lesson,
+  LogEntry,
+  Metrics,
+  Plan,
+  Review,
+  RunEvent,
+  RunSnapshot,
+  RunStatus,
+  Tone,
+} from "../types";
 
 export interface RunState {
   personas: string[];
@@ -14,11 +26,14 @@ export interface RunState {
   dimensionPlans: DimensionPlan[];
   dimensionChanges: Record<string, DimensionChange>;
   metrics: Metrics | null;
+  strategies: Record<string, string>; // dimension -> strategy chosen by the learning policy
+  recalled: Record<string, string[]>; // dimension -> lessons recalled from memory
+  learned: Lesson[]; // lessons written by the critic after the run
   log: LogEntry[];
   run: { id: string; startedAt: number; status: RunStatus; passed: boolean } | null;
 }
 
-export type View = "code" | "diff" | "plan";
+export type View = "code" | "diff" | "plan" | "memory";
 
 export type Action =
   | { type: "config"; personas: string[]; passingScore: number }
@@ -44,6 +59,9 @@ export const initialState: RunState = {
   dimensionPlans: [],
   dimensionChanges: {},
   metrics: null,
+  strategies: {},
+  recalled: {},
+  learned: [],
   log: [],
   run: null,
 };
@@ -62,6 +80,11 @@ export const EVENT_KINDS = [
   "scorecard",
   "patches",
   "verify",
+  "fix",
+  "memory_recall",
+  "strategy",
+  "learning",
+  "reflection",
   "finished",
 ] as const;
 
@@ -86,6 +109,9 @@ function freshRun(state: RunState, id: string, startedAt: number): RunState {
     dimensionPlans: [],
     dimensionChanges: {},
     metrics: null,
+    strategies: {},
+    recalled: {},
+    learned: [],
     log: [],
     autoSelect: true,
     run: { id, startedAt, status: "running", passed: false },
@@ -169,6 +195,39 @@ function applyEvent(state: RunState, event: RunEvent): RunState {
       const failed = (data.failed as unknown[]).length;
       const applied = (data.applied as unknown[]).length;
       return log(`Applied ${applied} patches${failed ? `, ${failed} did not apply` : ""}`, failed ? "bad" : "plain");
+    }
+    case "memory_recall": {
+      const lessons = data.lessons as Record<string, string[]>;
+      const text = data.total
+        ? `Recalled ${data.total} lessons from similar past tasks`
+        : "No lessons from similar past tasks yet";
+      const detail = Object.entries(lessons)
+        .map(([dimension, items]) => `${dimension}\n${items.map((l) => `  - ${l}`).join("\n")}`)
+        .join("\n\n");
+      return { ...log(text, "muted", detail ? { detail } : {}), recalled: lessons };
+    }
+    case "strategy":
+      return { ...state, strategies: { ...state.strategies, [data.dimension]: data.strategy } };
+    case "fix": {
+      const changed = (data.changed as string[]) ?? [];
+      const verdict = data.verified ? "fixed" : "still failing";
+      return log(`Fixer: ${data.diagnosis} (${changed.length ? verdict : "no change"})`, data.verified ? "ok" : "bad", {
+        detail: changed.join("\n"),
+      });
+    }
+    case "learning": {
+      const updates = data.policy_updates as { dimension: string; strategy: string; reward: number }[];
+      if (!updates.length) return state;
+      return log(`Updated strategy scores for ${updates.length} dimensions`, "muted", {
+        detail: updates.map((u) => `${u.dimension}: ${u.strategy} earned ${u.reward}`).join("\n"),
+      });
+    }
+    case "reflection": {
+      const lessons = data.lessons as Lesson[];
+      const next = log(`Learned ${lessons.length} lessons for next time`, "ok", {
+        detail: [data.summary, ...lessons.map((l) => `${l.dimension} (${l.step}): ${l.lesson}`)].join("\n"),
+      });
+      return { ...next, learned: lessons };
     }
     case "verify": {
       const ok = data.exit_code === 0;

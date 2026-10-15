@@ -9,6 +9,7 @@ interface Props {
   view: View;
   onView: (view: View) => void;
   planView: ReactNode;
+  memoryView: ReactNode;
 }
 
 function Welcome() {
@@ -31,9 +32,10 @@ function Welcome() {
   );
 }
 
-export function Editor({ path, content, diff, view, onView, planView }: Props) {
+export function Editor({ path, content, diff, view, onView, planView, memoryView }: Props) {
   const body = (() => {
     if (view === "plan") return planView;
+    if (view === "memory") return memoryView;
     if (!path || content === undefined) return <Welcome />;
     if (view === "diff") {
       if (!diff) return <div className="empty">No changes in this file.</div>;
@@ -64,7 +66,9 @@ export function Editor({ path, content, diff, view, onView, planView }: Props) {
   return (
     <section className="pane editor" aria-label="Editor">
       <div className="pane-head">
-        <span className="path">{view === "plan" ? "Ten-step plan" : (path ?? "")}</span>
+        <span className="path">
+          {view === "plan" ? "Ten-step plan" : view === "memory" ? "What AutoCode has learned" : (path ?? "")}
+        </span>
         <div className="tabs" role="group" aria-label="View">
           <button type="button" aria-pressed={view === "plan"} onClick={() => onView("plan")}>
             Plan
@@ -74,6 +78,9 @@ export function Editor({ path, content, diff, view, onView, planView }: Props) {
           </button>
           <button type="button" aria-pressed={view === "diff"} onClick={() => onView("diff")}>
             Changes
+          </button>
+          <button type="button" aria-pressed={view === "memory"} onClick={() => onView("memory")}>
+            Memory
           </button>
         </div>
       </div>
