@@ -47,6 +47,12 @@ def build_parser(env_config: PipelineConfig) -> argparse.ArgumentParser:
         "--mcp-config", default=env_config.mcp_config, help="MCP servers file (Claude-style mcpServers JSON)."
     )
     parser.add_argument(
+        "--fast",
+        action=argparse.BooleanOptionalAction,
+        default=env_config.fast_mode,
+        help="One generation pass instead of ten per-dimension implementation passes.",
+    )
+    parser.add_argument(
         "--a2a-peers", default=env_config.a2a_peers, help="Comma-separated A2A agent URLs to use as extra reviewers."
     )
     return parser
@@ -111,6 +117,7 @@ def main(argv: list[str] | None = None) -> None:
         command_timeout_seconds=args.command_timeout_seconds,
         mcp_config=args.mcp_config,
         a2a_peers=args.a2a_peers,
+        fast_mode=args.fast,
     )
     original = load_workspace(args.workspace)
     result = Orchestrator(config).run(requirement, original)

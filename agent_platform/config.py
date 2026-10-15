@@ -21,6 +21,7 @@ DEFAULTS = {
     "COMMAND_TIMEOUT_SECONDS": "60",
     "MCP_CONFIG": str(Path.home() / ".autocode" / "mcp.json"),
     "A2A_PEERS": "",
+    "FAST_MODE": "false",
 }
 
 
@@ -74,4 +75,5 @@ def config_from_env() -> PipelineConfig:
         command_timeout_seconds=env_value("COMMAND_TIMEOUT_SECONDS", int),
         mcp_config=env_value("MCP_CONFIG", str),
         a2a_peers=env_value("A2A_PEERS", str),
+        fast_mode=env_value("FAST_MODE", parse_bool),
     )

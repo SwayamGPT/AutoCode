@@ -80,10 +80,10 @@ def test_full_run_stream_and_apply(base_url: str, tmp_path: Path) -> None:
     assert any(event["kind"] == "files" and "app.py" in event["data"]["diffs"] for event in events)
 
     status, snapshot = request(f"{base_url}/api/runs/{run['id']}")
-    assert snapshot["status"] == "done" and list(snapshot["diffs"]) == ["app.py"]
+    assert snapshot["status"] == "done" and sorted(snapshot["diffs"]) == ["SECURITY.md", "app.py"]
 
     status, applied = request(f"{base_url}/api/runs/{run['id']}/apply", {})
-    assert status == 200 and applied["written"] == ["app.py"]
+    assert status == 200 and sorted(applied["written"]) == ["SECURITY.md", "app.py"]
     assert "Add two numbers" in (workspace / "app.py").read_text()
 
     # Replaying from a cursor only returns later events.

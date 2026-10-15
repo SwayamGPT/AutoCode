@@ -50,3 +50,57 @@ def test_cancel_stops_run() -> None:
     orchestrator, _ = make(llm)
     with pytest.raises(RunCancelled):
         orchestrator.run("make an adder")
+
+
+def test_ten_step_planning_then_per_dimension_changes() -> None:
+    llm = FakeLLM()
+    orchestrator, events = make(llm)
+    result = orchestrator.run("make an adder")
+
+    plans = [data for kind, data in events if kind == "dimension_plan"]
+    assert [p["step"] for p in plans] == list(range(1, 11))
+    assert result.plan["dimensions"][7] == {
+        "dimension": "Data Management",
+        "applicable": False,
+        "reason": "No persistent data.",
+        "requirements": [],
+        "decisions": [],
+        "files": [],
+        "acceptance_checks": [],
+    }
+    # Later planning steps see earlier decisions.
+    assert "Business Logic decision" in llm.prompts["Plan: Security"]
+
+    changes = {data["dimension"]: data for kind, data in events if kind == "dimension_change"}
+    assert len(changes) == 9  # Business Logic is the foundation build
+    assert changes["Data Management"]["skipped"] is True
+    assert changes["Security"]["changed"] == ["SECURITY.md"]
+    assert result.files["SECURITY.md"] == "# Threat model\n"
+    assert "../escape.py" not in result.files  # unsafe paths from the model are dropped
+
+    # Reviewers score against their own dimension plan.
+    assert "Security check" in llm.prompts["Security"]
+
+
+def test_fast_mode_skips_dimension_implementation() -> None:
+    llm = FakeLLM()
+    orchestrator, events = make(llm, fast_mode=True)
+    orchestrator.run("make an adder")
+    assert not any(call.startswith("Implement: ") for call in llm.calls)
+    assert sum(1 for kind, _ in events if kind == "dimension_plan") == 10
+
+
+def test_returns_best_reviewed_version_when_gates_never_pass() -> None:
+    class Declining(FakeLLM):
+        def ask_json(self, system_prompt: str, user_prompt: str, label: str) -> dict[str, Any]:
+            result = super().ask_json(system_prompt, user_prompt, label)
+            if label.startswith(("Plan: ", "Implement: ")) or label in {"Planner", "Generator"}:
+                return result
+            first_round = sum(1 for c in self.calls if c == label) == 1
+            return {**result, "score": 70 if first_round else 40, "status": "needs_work"}
+
+    orchestrator, events = make(Declining(), max_iterations=2)
+    result = orchestrator.run("make an adder")
+    assert not result.passed
+    assert all(review["score"] == 70 for review in result.reviews)
+    assert any(kind == "files" and data["stage"] == "best:iteration 1" for kind, data in events)
