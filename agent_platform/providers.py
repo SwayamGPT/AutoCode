@@ -214,7 +214,12 @@ class OpenAICompatibleProvider:
     def check(self, model: str) -> None:
         if "localhost" not in self.config.base_url and "127.0.0.1" not in self.config.base_url and not self.config.api_key:
             raise ProviderError(f"No API key for {self.config.name}. Add one in Settings.")
-        self.list_models()
+        try:
+            self.list_models()
+        except ProviderError as exc:
+            # Some OpenAI-compatible servers have no model list; only a rejected key or a dead server is fatal.
+            if "HTTP 404" not in str(exc) and "HTTP 405" not in str(exc):
+                raise
 
     def list_models(self) -> list[str]:
         return sorted(str(item.get("id")) for item in self.request("GET", "/models").get("data", []))
