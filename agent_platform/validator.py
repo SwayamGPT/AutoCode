@@ -1,24 +1,38 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from .patch_engine import write_project
+from .workspace import write_project
+
+TIMEOUT_EXIT_CODE = 124
+
+
+def python_executable() -> str | None:
+    """The interpreter for compile checks. In the packaged app sys.executable is AutoCode itself."""
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    return shutil.which("python3") or shutil.which("python")
 
 
 def run_command(command: str, cwd: Path, timeout_seconds: int) -> tuple[int, str]:
     if not command:
         return 0, "No command configured."
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        shell=True,
-        text=True,
-        capture_output=True,
-        timeout=timeout_seconds,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            shell=True,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return TIMEOUT_EXIT_CODE, f"Timed out after {timeout_seconds}s."
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
     return completed.returncode, output[-4000:]
 
@@ -39,5 +53,9 @@ class Validator:
             py_files = [str(path.relative_to(project_dir)) for path in project_dir.rglob("*.py")]
             if not py_files:
                 return {"command": "", "exit_code": 0, "output": "No Python files to compile."}
-            code, output = run_command("python -m compileall -q .", project_dir, self.timeout_seconds)
+            python = python_executable()
+            if python is None:
+                return {"command": "", "exit_code": 0, "output": "Python not found; skipped compile check."}
+            command = f'"{python}" -m compileall -q .'
+            code, output = run_command(command, project_dir, self.timeout_seconds)
             return {"command": "python -m compileall -q .", "exit_code": code, "output": output}

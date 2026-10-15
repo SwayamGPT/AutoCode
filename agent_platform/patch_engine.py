@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from .models import PatchApplyResult
+from .workspace import is_safe_relative_path, write_project
+
+TIMEOUT_EXIT_CODE = 124
 
 
 def collect_patches(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -19,25 +22,12 @@ def collect_patches(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(patches, key=lambda patch: severity_rank.get(str(patch.get("severity", "medium")), 2))
 
 
-def is_safe_relative_path(path: str) -> bool:
-    candidate = Path(path)
-    return not candidate.is_absolute() and ".." not in candidate.parts
-
-
-def write_project(temp_dir: Path, files: dict[str, str]) -> None:
-    for relative_path, content in files.items():
-        path = temp_dir / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
-
-def read_project_files(project_dir: Path) -> dict[str, str]:
+def read_back(project_dir: Path, paths: set[str]) -> dict[str, str]:
     files: dict[str, str] = {}
-    for path in project_dir.rglob("*"):
-        if not path.is_file() or ".git" in path.parts:
-            continue
-        relative_path = path.relative_to(project_dir).as_posix()
-        files[relative_path] = path.read_text(encoding="utf-8")
+    for relative_path in sorted(paths):
+        path = project_dir / relative_path
+        if path.is_file():
+            files[relative_path] = path.read_text(encoding="utf-8")
     return files
 
 
@@ -47,14 +37,17 @@ def run_process(
     input_text: str | None = None,
     timeout_seconds: int = 60,
 ) -> tuple[int, str]:
-    completed = subprocess.run(
-        args,
-        cwd=cwd,
-        input=input_text,
-        text=True,
-        capture_output=True,
-        timeout=timeout_seconds,
-    )
+    try:
+        completed = subprocess.run(
+            args,
+            cwd=cwd,
+            input=input_text,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return TIMEOUT_EXIT_CODE, f"Timed out after {timeout_seconds}s."
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
     return completed.returncode, output[-4000:]
 
@@ -122,4 +115,5 @@ class PatchEngine:
 
                 applied.append(patch)
 
-            return PatchApplyResult(files=read_project_files(project_dir), applied=applied, failed=failed)
+            touched = set(files) | {str(patch.get("file", "")) for patch in applied}
+            return PatchApplyResult(files=read_back(project_dir, touched), applied=applied, failed=failed)
