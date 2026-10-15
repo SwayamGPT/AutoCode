@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from typing import Any, Callable
 
 from ollama import Client
@@ -24,6 +25,7 @@ class OllamaClient:
         num_ctx: int,
         on_call: Callable[[str], None] | None = None,
         cancel_event: threading.Event | None = None,
+        on_done: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.model = model
         self.host = host
@@ -31,6 +33,7 @@ class OllamaClient:
         self.num_ctx = num_ctx
         self.on_call = on_call or (lambda label: print(f"  LLM call: {label} ({model})", flush=True))
         self.cancel_event = cancel_event or threading.Event()
+        self.on_done = on_done or (lambda metrics: None)
         self.client = Client(host=host, timeout=request_timeout_seconds)
 
     def ensure_ready(self) -> None:
@@ -47,6 +50,7 @@ class OllamaClient:
         if self.cancel_event.is_set():
             raise RunCancelled()
         self.on_call(label)
+        started = time.monotonic()
         response = self.client.chat(
             model=self.model,
             messages=[
@@ -55,6 +59,14 @@ class OllamaClient:
             ],
             format="json" if json_mode else None,
             options={"temperature": self.temperature, "num_ctx": self.num_ctx},
+        )
+        self.on_done(
+            {
+                "label": label,
+                "seconds": round(time.monotonic() - started, 2),
+                "prompt_tokens": int(getattr(response, "prompt_eval_count", 0) or 0),
+                "output_tokens": int(getattr(response, "eval_count", 0) or 0),
+            }
         )
         return response.message.content or ""
 

@@ -109,7 +109,7 @@ def test_generate_code_tool_writes_changes_and_reports_progress(monkeypatch: pyt
     reply = wait_for_reply(out, 7)["result"]
     assert reply["isError"] is False
     assert reply["structuredContent"]["passed"] is True
-    assert reply["structuredContent"]["written"] == ["app.py"]
+    assert sorted(reply["structuredContent"]["written"]) == ["SECURITY.md", "app.py"]
     assert "Add two numbers" in (tmp_path / "app.py").read_text()
     assert any(m.get("method") == "notifications/progress" for m in out.messages())
 

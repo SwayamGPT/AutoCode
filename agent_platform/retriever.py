@@ -5,6 +5,8 @@ import re
 
 from .models import Persona
 
+PRIORITY_BOOST = 25  # files the persona's own dimension plan touches
+
 
 class RetrieverAgent:
     def file_tokens(self, path: str, content: str) -> set[str]:
@@ -19,7 +21,9 @@ class RetrieverAgent:
         plan: dict,
         files: dict[str, str],
         max_files: int,
+        priority_paths: list[str] | None = None,
     ) -> dict[str, str]:
+        priority = set(priority_paths or [])
         query = " ".join(
             [
                 persona.name,
@@ -34,6 +38,8 @@ class RetrieverAgent:
         scored: list[tuple[int, str]] = []
         for path, content in files.items():
             score = len(query_tokens & self.file_tokens(path, content))
+            if path in priority:
+                score += PRIORITY_BOOST
             if path.endswith((".env", ".sql", ".json", ".yaml", ".yml", ".toml")):
                 score += 2
             if persona.name == "Testing & Quality Assurance" and "test" in path.lower():

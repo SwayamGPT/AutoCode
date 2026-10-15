@@ -14,6 +14,31 @@ PATCH = """--- a/app.py
 """
 
 
+def is_review_call(label: str) -> bool:
+    return label not in {"Planner", "Generator", "Context Agent"} and not label.startswith(("Plan: ", "Implement: "))
+
+
+def dimension_plan(name: str) -> dict[str, Any]:
+    if name == "Data Management":
+        return {"applicable": False, "reason": "No persistent data."}
+    files = [{"path": "SECURITY.md", "change": "document threat model"}] if name == "Security" else []
+    return {
+        "applicable": True,
+        "requirements": [f"{name} requirement"],
+        "decisions": [f"{name} decision"],
+        "files": files,
+        "acceptance_checks": [f"{name} check"],
+    }
+
+
+def implementation(name: str) -> dict[str, Any]:
+    if name == "Security":
+        return {"summary": "Documented the threat model.", "files": {"SECURITY.md": "# Threat model\n"}}
+    if name == "Scalability":
+        return {"summary": "Tried to escape.", "files": {"../escape.py": "x"}}
+    return {"summary": "Nothing to change.", "files": {}}
+
+
 class FakeLLM:
     """Scripted stand-in for OllamaClient: plans one file, every reviewer passes after one patch round."""
 
@@ -21,6 +46,7 @@ class FakeLLM:
         self.review_score = review_score
         self.patch = patch
         self.calls: list[str] = []
+        self.prompts: dict[str, str] = {}
         self.cancel_event = threading.Event()
         self.lock = threading.Lock()
 
@@ -32,7 +58,12 @@ class FakeLLM:
             raise RunCancelled()
         with self.lock:
             self.calls.append(label)
-            reviews_so_far = sum(1 for call in self.calls if call not in {"Planner", "Generator", "Context Agent"})
+            self.prompts[label] = user_prompt
+            reviews_so_far = sum(1 for call in self.calls if is_review_call(call))
+        if label.startswith("Plan: "):
+            return dimension_plan(label.removeprefix("Plan: "))
+        if label.startswith("Implement: "):
+            return implementation(label.removeprefix("Implement: "))
         if label == "Context Agent":
             return {"calls": [{"server": "autocode", "tool": "list_reviewers", "arguments": {}}]}
         if label == "Planner":

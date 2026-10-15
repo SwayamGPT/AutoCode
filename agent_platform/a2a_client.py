@@ -97,7 +97,13 @@ class RemoteReviewer:
         self.client = A2AClient(url, timeout_seconds)
         self.name = peer_name(url)
 
-    def run(self, requirement: str, project_memory: dict[str, Any], relevant_files: dict[str, str]) -> dict[str, Any]:
+    def run(
+        self,
+        requirement: str,
+        project_memory: dict[str, Any],
+        relevant_files: dict[str, str],
+        dimension_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         task = self.client.send_message(f"Review these files for this requirement:\n{requirement}",
                                         {"skill": "review", "files": relevant_files})
         return review_from_task(self.name, task)

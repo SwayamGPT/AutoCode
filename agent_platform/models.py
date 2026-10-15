@@ -26,6 +26,7 @@ class PipelineConfig:
     command_timeout_seconds: int
     mcp_config: str = ""
     a2a_peers: str = ""
+    fast_mode: bool = False
 
 
 @dataclass(frozen=True)

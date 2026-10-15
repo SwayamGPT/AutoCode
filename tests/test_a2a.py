@@ -61,7 +61,7 @@ def test_generate_skill_returns_file_artifacts(base_url: str) -> None:
     task = rpc(base_url, "SendMessage", {"message": message("make an adder")})["result"]["task"]
     assert task["status"]["state"] == "TASK_STATE_COMPLETED"
     names = [artifact["name"] for artifact in task["artifacts"]]
-    assert names == ["app.py", "review"]
+    assert names == ["SECURITY.md", "app.py", "review"]
     assert task["history"][0]["role"] == "ROLE_USER"
 
     fetched = rpc(base_url, "GetTask", {"id": task["id"]})["result"]
