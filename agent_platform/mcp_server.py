@@ -29,9 +29,11 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "generate_code",
         "title": "Generate or change code",
-        "description": "Plan, write, review (ten weighted personas), patch, and test code for a requirement using "
-        "a local Ollama model. With a workspace, existing files are used as context and only changes are "
-        "returned; set write=true to write them to disk.",
+        "description": "Generate or change code with a local Ollama model across ten quality dimensions "
+        "(business logic, security, UI/UX, performance, reliability, maintainability, scalability, data, testing, "
+        "observability): ten-step planning, per-dimension code changes, then review/patch/test until it passes. "
+        "With a workspace, existing files are used as context and only changes are returned; set write=true to "
+        "write them to disk.",
         "inputSchema": {
             "type": "object",
             "properties": {
