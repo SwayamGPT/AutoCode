@@ -11,6 +11,17 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.13"]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: autocode
+          POSTGRES_PASSWORD: autocode
+          POSTGRES_DB: autocode
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U autocode" --health-interval 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://autocode:autocode@localhost:5432/autocode
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

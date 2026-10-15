@@ -11,6 +11,8 @@ a = Analysis(
     [str(root / "app.py")],
     pathex=[str(root)],
     datas=[(str(static), "agent_platform/static")],
+    # psycopg loads its compiled backend dynamically; PyInstaller cannot see that import.
+    hiddenimports=["psycopg_binary"],
     excludes=["tkinter", "pytest"],
     noarchive=False,
 )

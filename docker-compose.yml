@@ -1,26 +1,46 @@
+# Zero configuration: `docker compose up` starts Ollama (and downloads the chat + embedding models),
+# Postgres with pgvector for memory, and AutoCode at http://127.0.0.1:8000. A .env file is optional;
+# every value below has a default. Hosted-model API keys are passed through when set in your shell.
 services:
   ollama:
-    image: ollama/ollama:${OLLAMA_IMAGE_TAG}
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
     ports:
-      - "${OLLAMA_PORT}:11434"
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
       test: ["CMD", "ollama", "list"]
-      interval: ${OLLAMA_HEALTHCHECK_INTERVAL}
-      timeout: ${OLLAMA_HEALTHCHECK_TIMEOUT}
-      retries: ${OLLAMA_HEALTHCHECK_RETRIES}
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   ollama-pull:
-    image: ollama/ollama:${OLLAMA_IMAGE_TAG}
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
     depends_on:
       ollama:
         condition: service_healthy
     environment:
       OLLAMA_HOST: http://ollama:11434
     entrypoint: ["/bin/sh", "-c"]
-    command: ["ollama pull ${OLLAMA_MODEL}"]
+    command: ["ollama pull ${OLLAMA_MODEL:-qwen3:4b} && ollama pull ${EMBEDDING_OLLAMA_MODEL:-nomic-embed-text}"]
     restart: "no"
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: autocode
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autocode}
+      POSTGRES_DB: autocode
+    ports:
+      # Published on loopback so the desktop app finds this memory database automatically.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autocode -d autocode"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
   app:
     build:
@@ -29,14 +49,33 @@ services:
     depends_on:
       ollama-pull:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b}
+      EMBEDDING_MODEL: ollama:${EMBEDDING_OLLAMA_MODEL:-nomic-embed-text}
+      DATABASE_URL: postgresql://autocode:${POSTGRES_PASSWORD:-autocode}@postgres:5432/autocode
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+    volumes:
+      # Settings saved in the UI, run history and logs survive container rebuilds.
+      - autocode-home:/root/.autocode
     # UI + A2A endpoint, published on loopback only.
     ports:
-      - "127.0.0.1:${UI_PORT}:8000"
+      - "127.0.0.1:${UI_PORT:-8000}:8000"
     command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
 
 volumes:
   ollama-data:
+  pg-data:
+  autocode-home:
