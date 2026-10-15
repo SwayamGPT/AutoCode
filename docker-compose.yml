@@ -33,7 +33,10 @@ services:
       - .env
     environment:
       OLLAMA_HOST: http://ollama:11434
-    command: ["--help"]
+    # UI + A2A endpoint, published on loopback only.
+    ports:
+      - "127.0.0.1:${UI_PORT}:8000"
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:
   ollama-data:
