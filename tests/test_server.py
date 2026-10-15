@@ -152,3 +152,42 @@ def test_models_and_health_endpoints(base_url: str) -> None:
     status, health = request(base_url + "/api/health")
     assert status == 200 and {"ok", "git", "models", "memory", "embedding"} <= set(health)
     assert health["models"][0]["roles"] == ["planner", "coder", "reviewer", "critic"]
+
+
+def test_agent_run_waits_for_approval(base_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_tools import ScriptedLLM
+
+    actions = [
+        {"thought": "write", "tool": "write_file", "args": {"path": "hello.py", "content": "print('hi')\n"}},
+        {"thought": "run", "tool": "run_command", "args": {"command": "echo approved-run"}},
+        {"thought": "done", "final": "Wrote hello.py."},
+    ]
+
+    class Ready(ScriptedLLM):
+        def ensure_ready(self) -> None:
+            pass
+
+    monkeypatch.setattr(runs_module, "build_llms", lambda *a, **k: {"coder": Ready(list(actions))})
+    assert request(base_url + "/api/runs", {"requirement": "x", "mode": "agent", "workspace": str(tmp_path / "nope")})[0] == 400
+
+    status, run = request(base_url + "/api/runs", {"requirement": "say hi", "mode": "agent", "workspace": str(tmp_path)})
+    assert status == 201
+    kinds = []
+    with urllib.request.urlopen(f"{base_url}/api/runs/{run['id']}/events", timeout=30) as response:
+        for raw in response:
+            line = raw.decode().strip()
+            if not line.startswith("data: "):
+                continue
+            event = json.loads(line[6:])
+            kinds.append(event["kind"])
+            if event["kind"] == "approval_request":
+                assert event["data"]["summary"] == "Run: echo approved-run"
+                ok = request(f"{base_url}/api/runs/{run['id']}/approve", {"id": event["data"]["id"], "approved": True})
+                assert ok[0] == 200
+            if event["kind"] == "finished":
+                break
+    assert (tmp_path / "hello.py").read_text() == "print('hi')\n"
+    assert "files" in kinds and "approval_result" in kinds and kinds[-2] == "agent_final"
+    _, snapshot = request(f"{base_url}/api/runs/{run['id']}")
+    assert snapshot["status"] == "done" and snapshot["mode"] == "agent"
+    assert request(f"{base_url}/api/runs/{run['id']}/approve", {"id": "zzz", "approved": True})[0] == 404

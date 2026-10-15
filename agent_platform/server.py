@@ -210,6 +210,8 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
                 self.read_json()
                 self.get_run(run_id).cancel_event.set()
                 return self.send_json({"ok": True})
+            if route == ("POST", "runs", "*", "approve"):
+                return self.approve(self.get_run(run_id), self.read_json())
             if route == ("POST", "runs", "*", "apply"):
                 return self.apply_run(self.get_run(run_id), self.read_json())
             raise ApiError(HTTPStatus.NOT_FOUND, "Not found.")
@@ -303,11 +305,25 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
                 raise ApiError(HTTPStatus.BAD_REQUEST, "settings must be an object.")
             try:
                 config = coerce_settings(state.config, settings, RUN_LOCKED)
-                run = Run(requirement, str(payload.get("workspace") or "").strip(), config)
+                mode = str(payload.get("mode") or "generate")
+                workspace = str(payload.get("workspace") or "").strip()
+                if mode not in {"generate", "agent"}:
+                    raise ValueError("mode must be generate or agent")
+                if mode == "agent" and not (workspace and Path(workspace).expanduser().is_dir()):
+                    raise ValueError("Agent mode works in an existing project folder; open one first.")
+                run = Run(requirement, workspace, config, mode=mode)
             except ValueError as exc:
                 raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
             store.start(run)
             self.send_json(run.summary(), HTTPStatus.CREATED)
+
+        def approve(self, run: Run, payload: dict[str, Any]) -> None:
+            approved = payload.get("approved")
+            if not isinstance(approved, bool):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "approved must be true or false")
+            if not run.decide(str(payload.get("id", "")), approved):
+                raise ApiError(HTTPStatus.NOT_FOUND, "No pending approval with that id.")
+            self.send_json({"ok": True})
 
         def apply_run(self, run: Run, payload: dict[str, Any]) -> None:
             if run.status not in FINISHED:

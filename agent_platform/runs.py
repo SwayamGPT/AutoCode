@@ -10,11 +10,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .llm import RunCancelled
+from .config import setting
+from .llm import RunCancelled, build_llms
 from .models import PipelineConfig
 from .orchestrator import Orchestrator
 from .workspace import changed_files, file_diff, load_workspace
-from .config import setting
 
 FINISHED = {"done", "error", "cancelled"}
 WAIT_POLL_SECONDS = 1.0
@@ -22,6 +22,7 @@ MAX_SAVED_RUNS = setting("MAX_SAVED_RUNS", 50)
 EMPTY_METRICS = {"llm_calls": 0, "prompt_tokens": 0, "output_tokens": 0, "llm_seconds": 0.0}
 
 logger = logging.getLogger("autocode.runs")
+AGENT_APPROVAL = setting("AGENT_APPROVAL", "ask")  # ask | auto | read_only
 
 
 class Run:
@@ -34,7 +35,8 @@ class Run:
         files: dict[str, str] | None = None,
         context_id: str = "",
     ) -> None:
-        """mode "generate" runs the full pipeline; mode "review" only scores the given files."""
+        """mode "generate" runs the full pipeline; "review" only scores the given files; "agent" works in the
+        workspace with tools (files, shell, git, GitHub)."""
         self.id = uuid.uuid4().hex[:12]
         self.context_id = context_id or self.id
         self.requirement = requirement
@@ -54,6 +56,49 @@ class Run:
         self.events: list[dict[str, Any]] = []
         self.cond = threading.Condition()
         self.cancel_event = threading.Event()
+        self.approvals: dict[str, dict[str, Any]] = {}
+
+    # --- approvals (agent mode) ----------------------------------------------------------------
+    def request_approval(self, tool: str, args: dict[str, Any], summary: str) -> bool:
+        """Block the agent until the user approves or declines in the UI (or the run is cancelled)."""
+        approval_id = uuid.uuid4().hex[:8]
+        decided = threading.Event()
+        self.approvals[approval_id] = {"event": decided, "approved": False}
+        self.emit("approval_request", {"id": approval_id, "tool": tool, "summary": summary, "args": json.dumps(args)[:2000]})
+        while not decided.wait(WAIT_POLL_SECONDS):
+            if self.cancel_event.is_set():
+                raise RunCancelled()
+        approved = bool(self.approvals.pop(approval_id)["approved"])
+        self.emit("approval_result", {"id": approval_id, "tool": tool, "approved": approved})
+        return approved
+
+    def decide(self, approval_id: str, approved: bool) -> bool:
+        pending = self.approvals.get(approval_id)
+        if not pending:
+            return False
+        pending["approved"] = approved
+        pending["event"].set()
+        return True
+
+    def execute_agent(self) -> None:
+        from .tool_agent import ToolAgent
+        from .tools import ToolKit
+
+        llm = build_llms(
+            self.config,
+            on_call=lambda label: self.emit("llm_call", {"label": label}),
+            on_done=lambda metrics: self.emit("llm_done", metrics),
+            cancel_event=self.cancel_event,
+        )["coder"]
+        llm.ensure_ready()
+        toolkit = ToolKit(
+            self.workspace,
+            self.request_approval,
+            AGENT_APPROVAL,
+            self.config.command_timeout_seconds,
+            on_change=lambda: self.emit("files", {"files": load_workspace(self.workspace), "stage": "agent"}),
+        )
+        self.passed, _ = ToolAgent(llm, toolkit, self.emit).run(self.requirement)
 
     def changed(self) -> dict[str, str]:
         return changed_files(self.original, self.files)
@@ -91,10 +136,13 @@ class Run:
     def execute(self) -> None:
         logger.info("run=%s started mode=%s model=%s workspace=%r", self.id, self.mode, self.config.model, self.workspace)
         try:
-            orchestrator = Orchestrator(self.config, emit=self.emit, cancel_event=self.cancel_event, run_id=self.id)
-            if self.mode == "review":
+            if self.mode == "agent":
+                self.execute_agent()
+            elif self.mode == "review":
+                orchestrator = Orchestrator(self.config, emit=self.emit, cancel_event=self.cancel_event, run_id=self.id)
                 self.passed, _ = orchestrator.review(self.requirement, self.original)
             else:
+                orchestrator = Orchestrator(self.config, emit=self.emit, cancel_event=self.cancel_event, run_id=self.id)
                 self.passed = orchestrator.run(self.requirement, self.original).passed
             self.status = "done"
         except RunCancelled:

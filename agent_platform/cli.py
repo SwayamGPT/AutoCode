@@ -24,7 +24,7 @@ def print_files(files: dict[str, str]) -> None:
 
 def build_parser(env_config: PipelineConfig) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run a modular agentic code pipeline. Subcommands: `desktop` (app window), `serve` (UI + A2A over HTTP), `mcp` (MCP stdio server)."
+        description="Run a modular agentic code pipeline. Subcommands: `desktop` (app window), `serve` (UI + A2A over HTTP), `mcp` (MCP stdio server), `agent` (tool-using agent)."
     )
     parser.add_argument("requirement", nargs="*", help="The code-generation requirement.")
     parser.add_argument(
@@ -68,6 +68,34 @@ def build_serve_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def run_agent_cli(config: PipelineConfig, argv: list[str]) -> None:
+    from .llm import build_llms
+    from .runs import AGENT_APPROVAL
+    from .tool_agent import ToolAgent
+    from .tools import ToolKit
+
+    parser = argparse.ArgumentParser(prog="app.py agent", description="Work on a project with file, git and GitHub tools.")
+    parser.add_argument("task", nargs="+")
+    parser.add_argument("--workspace", default=".", help="Project folder (default: current folder).")
+    args = parser.parse_args(argv)
+
+    def ask(tool: str, tool_args: dict, summary: str) -> bool:
+        return input(f"\nAllow {summary}? [y/N] ").strip().lower() in {"y", "yes"}
+
+    def show(kind: str, data: dict) -> None:
+        if kind == "tool_call":
+            print(f"[{data['step']}] {data['tool']} {data['args'][:200]}", flush=True)
+        elif kind == "tool_result" and not data["ok"]:
+            print(f"    {data['result'][:300]}", flush=True)
+        elif kind == "agent_final":
+            print(f"\n{data['message']}")
+
+    llm = build_llms(config, on_call=lambda label: None)["coder"]
+    llm.ensure_ready()
+    toolkit = ToolKit(args.workspace, ask, AGENT_APPROVAL, config.command_timeout_seconds)
+    ToolAgent(llm, toolkit, show).run(" ".join(args.task))
+
+
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     # Windowed builds (no console) start with sys.stdout/sys.stderr set to None.
@@ -91,6 +119,10 @@ def main(argv: list[str] | None = None) -> None:
         from .mcp_server import serve_stdio
 
         serve_stdio(env_config)
+        return
+
+    if argv[:1] == ["agent"]:
+        run_agent_cli(env_config, argv[1:])
         return
 
     if argv[:1] == ["serve"]:
