@@ -2,8 +2,35 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Callable, TypeVar
 
 from .models import PipelineConfig
+
+T = TypeVar("T")
+
+DEFAULTS = {
+    "OLLAMA_MODEL": "qwen3:4b",
+    "OLLAMA_HOST": "http://localhost:11434",
+    "OLLAMA_REQUEST_TIMEOUT_SECONDS": "600",
+    "LLM_TEMPERATURE": "0.2",
+    "LLM_NUM_CTX": "8192",
+    "MAX_ITERATIONS": "2",
+    "PASSING_SCORE": "85",
+    "MAX_RETRIEVED_FILES": "5",
+    "SKIP_VERIFY": "false",
+    "COMMAND_TIMEOUT_SECONDS": "60",
+    "MCP_CONFIG": str(Path.home() / ".autocode" / "mcp.json"),
+    "A2A_PEERS": "",
+}
+
+
+CONFIG_HOME = Path.home() / ".autocode"
+
+
+def load_env_files() -> None:
+    """Project .env first, then ~/.autocode/.env (used by the packaged app). Real env vars win over both."""
+    load_env_file(".env")
+    load_env_file(str(CONFIG_HOME / ".env"))
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -21,44 +48,30 @@ def load_env_file(path: str = ".env") -> None:
         os.environ.setdefault(key, value)
 
 
-def env_str(name: str) -> str:
-    value = os.environ.get(name)
-    if value is None or value == "":
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
+def env_value(name: str, parse: Callable[[str], T]) -> T:
+    value = os.environ.get(name) or DEFAULTS[name]
+    try:
+        return parse(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid value for {name}: {value!r}") from exc
 
 
-def env_int(name: str) -> int:
-    value = os.environ.get(name)
-    if value is None or value == "":
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return int(value)
-
-
-def env_float(name: str) -> float:
-    value = os.environ.get(name)
-    if value is None or value == "":
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return float(value)
-
-
-def env_bool(name: str) -> bool:
-    value = os.environ.get(name)
-    if value is None or value == "":
-        raise RuntimeError(f"Missing required environment variable: {name}")
+def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def config_from_env() -> PipelineConfig:
     return PipelineConfig(
-        model=env_str("OLLAMA_MODEL"),
-        ollama_host=env_str("OLLAMA_HOST"),
-        ollama_request_timeout_seconds=env_int("OLLAMA_REQUEST_TIMEOUT_SECONDS"),
-        temperature=env_float("LLM_TEMPERATURE"),
-        num_ctx=env_int("LLM_NUM_CTX"),
-        max_iterations=env_int("MAX_ITERATIONS"),
-        passing_score=env_int("PASSING_SCORE"),
-        max_retrieved_files=env_int("MAX_RETRIEVED_FILES"),
-        skip_verify=env_bool("SKIP_VERIFY"),
-        command_timeout_seconds=env_int("COMMAND_TIMEOUT_SECONDS"),
+        model=env_value("OLLAMA_MODEL", str),
+        ollama_host=env_value("OLLAMA_HOST", str),
+        ollama_request_timeout_seconds=env_value("OLLAMA_REQUEST_TIMEOUT_SECONDS", int),
+        temperature=env_value("LLM_TEMPERATURE", float),
+        num_ctx=env_value("LLM_NUM_CTX", int),
+        max_iterations=env_value("MAX_ITERATIONS", int),
+        passing_score=env_value("PASSING_SCORE", int),
+        max_retrieved_files=env_value("MAX_RETRIEVED_FILES", int),
+        skip_verify=env_value("SKIP_VERIFY", parse_bool),
+        command_timeout_seconds=env_value("COMMAND_TIMEOUT_SECONDS", int),
+        mcp_config=env_value("MCP_CONFIG", str),
+        a2a_peers=env_value("A2A_PEERS", str),
     )

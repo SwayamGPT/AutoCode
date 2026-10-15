@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import threading
+from typing import Any, Callable
+
+from .a2a_client import RemoteReviewer, peer_urls
+from .context_agent import ContextAgent
 from .generator import GeneratorAgent
 from .llm import OllamaClient
 from .memory import MemoryManager
-from .models import PipelineConfig
+from .models import PipelineConfig, RunResult
 from .patch_engine import PatchEngine, collect_patches
 from .personas import PERSONAS
 from .planner import PlannerAgent
@@ -11,114 +16,176 @@ from .retriever import RetrieverAgent
 from .reviewer import ReviewCoordinator
 from .validator import Validator
 
+Emit = Callable[[str, dict[str, Any]], None]
+
+
+def console_emit(kind: str, data: dict[str, Any]) -> None:
+    if kind == "status":
+        print(data["message"], flush=True)
+    elif kind == "llm_call":
+        print(f"  LLM call: {data['label']}", flush=True)
+    elif kind == "review":
+        print(f"  Finished: {data['review'].get('persona', 'Unknown')}", flush=True)
+    elif kind == "scorecard":
+        print_scorecard(data["reviews"])
+    elif kind == "patches":
+        print(f"  Applied patches: {len(data['applied'])}")
+        print(f"  Failed patches: {len(data['failed'])}")
+    elif kind == "verify":
+        print(f"  Command: {data['command'] or 'none'}")
+        print(f"  Exit code: {data['exit_code']}")
+        if data["output"]:
+            print(data["output"])
+
+
+def is_failing(review: dict[str, Any], passing_score: int) -> bool:
+    try:
+        score = int(review.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0
+    return review.get("status") != "pass" or score < passing_score
+
 
 class Orchestrator:
-    def __init__(self, config: PipelineConfig) -> None:
-        llm = OllamaClient(
+    def __init__(
+        self,
+        config: PipelineConfig,
+        emit: Emit = console_emit,
+        cancel_event: threading.Event | None = None,
+        llm: OllamaClient | None = None,
+    ) -> None:
+        self.emit = emit
+        self.llm = llm or OllamaClient(
             model=config.model,
             host=config.ollama_host,
             request_timeout_seconds=config.ollama_request_timeout_seconds,
             temperature=config.temperature,
             num_ctx=config.num_ctx,
+            on_call=lambda label: emit("llm_call", {"label": label}),
+            cancel_event=cancel_event,
         )
-        retriever = RetrieverAgent()
         self.config = config
         self.memory = MemoryManager()
-        self.planner = PlannerAgent(llm)
-        self.generator = GeneratorAgent(llm)
-        self.review_coordinator = ReviewCoordinator(llm, PERSONAS, retriever)
+        self.context_agent = ContextAgent(self.llm, config.mcp_config, config.command_timeout_seconds, emit)
+        self.planner = PlannerAgent(self.llm)
+        self.generator = GeneratorAgent(self.llm)
+        peers = [RemoteReviewer(url, config.ollama_request_timeout_seconds) for url in peer_urls(config)]
+        self.review_coordinator = ReviewCoordinator(self.llm, PERSONAS, RetrieverAgent(), peers)
+        self.local_review_coordinator = ReviewCoordinator(self.llm, PERSONAS, RetrieverAgent())
         self.patch_engine = PatchEngine(timeout_seconds=config.command_timeout_seconds)
         self.validator = Validator(timeout_seconds=config.command_timeout_seconds)
 
-    def run(self, requirement: str) -> dict[str, str]:
-        print("Checking Ollama/model availability...")
-        self.planner.llm.ensure_ready()
+    def status(self, message: str) -> None:
+        self.emit("status", {"message": message})
 
-        print("Planning architecture...")
-        plan = self.planner.run(requirement)
+    def run(self, requirement: str, existing_files: dict[str, str] | None = None) -> RunResult:
+        existing_files = existing_files or {}
+        self.status("Checking Ollama/model availability...")
+        self.llm.ensure_ready()
 
-        print("Generating planned files...")
-        files = self.generator.run(requirement, plan)
+        context = self.context_agent.gather(requirement, existing_files)
 
+        self.status("Planning architecture..." if not existing_files else "Planning changes to existing project...")
+        plan = self.planner.run(requirement, existing_files, context)
+        self.emit("plan", {"plan": plan})
+
+        self.status("Generating planned files...")
+        files = self.generator.run(requirement, plan, existing_files, context)
+        self.emit("files", {"files": files, "stage": "generated"})
+
+        reviews: list[dict[str, Any]] = []
         for iteration in range(1, self.config.max_iterations + 1):
-            print(f"\nReview iteration {iteration}/{self.config.max_iterations}")
-            project_memory = self.memory.project_summary(plan, files)
-            reviews = self.review_coordinator.run(
-                requirement=requirement,
-                plan=plan,
-                files=files,
-                project_memory=project_memory,
-                max_retrieved_files=self.config.max_retrieved_files,
+            self.status(f"Review iteration {iteration}/{self.config.max_iterations}")
+            reviews = self.review_round(self.review_coordinator, requirement, plan, files, iteration)
+
+            failing = [review for review in reviews if is_failing(review, self.config.passing_score)]
+            if failing:
+                files = self.apply_patches(files, reviews)
+
+            verified = self.config.skip_verify or self.verify(plan, files)
+            if not failing and verified:
+                self.status("All quality gates passed.")
+                return RunResult(files=files, plan=plan, reviews=reviews, passed=True)
+
+        self.status("Max iterations reached. Returning best available files.")
+        return RunResult(files=files, plan=plan, reviews=reviews, passed=False)
+
+    def review_round(
+        self,
+        coordinator: ReviewCoordinator,
+        requirement: str,
+        plan: dict[str, Any],
+        files: dict[str, str],
+        iteration: int,
+    ) -> list[dict[str, Any]]:
+        reviews = coordinator.run(
+            requirement=requirement,
+            plan=plan,
+            files=files,
+            project_memory=self.memory.project_summary(plan, files),
+            max_retrieved_files=self.config.max_retrieved_files,
+            on_review=lambda review: self.emit("review", {"review": review}),
+        )
+        self.memory.remember_reviews(reviews)
+        self.emit("scorecard", {"iteration": iteration, "reviews": reviews})
+        return reviews
+
+    def review(self, requirement: str, files: dict[str, str]) -> tuple[bool, list[dict[str, Any]]]:
+        """Review-only mode (A2A/MCP review skill). Local personas only, so two peers never call each other in a loop."""
+        self.llm.ensure_ready()
+        self.status("Reviewing files...")
+        plan = {"summary": requirement, "files": [{"path": path} for path in files]}
+        reviews = self.review_round(self.local_review_coordinator, requirement, plan, files, 1)
+        return not any(is_failing(review, self.config.passing_score) for review in reviews), reviews
+
+    def apply_patches(self, files: dict[str, str], reviews: list[dict[str, Any]]) -> dict[str, str]:
+        self.status("Applying reviewer patches...")
+        result = self.patch_engine.apply(files, collect_patches(reviews))
+        self.emit("patches", {"applied": result.applied, "failed": result.failed})
+        if result.applied:
+            self.emit("files", {"files": result.files, "stage": "patched"})
+        if result.failed:
+            self.memory.remember_event(
+                {
+                    "persona": "Patch Engine",
+                    "score": 0,
+                    "status": "needs_work",
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "file": str(patch.get("file", "")),
+                            "description": "Patch failed to apply mechanically.",
+                            "suggested_fix": str(patch.get("output", ""))[:1000],
+                        }
+                        for patch in result.failed
+                    ],
+                    "patches": [],
+                }
             )
-            self.memory.remember_reviews(reviews)
-            print_scorecard(reviews)
+        return result.files
 
-            failing_reviews = [
-                review
-                for review in reviews
-                if review.get("status") != "pass"
-                or int(review.get("score", 0)) < self.config.passing_score
-            ]
-
-            if failing_reviews:
-                print("\nApplying reviewer patches...")
-                patch_result = self.patch_engine.apply(files, collect_patches(reviews))
-                files = patch_result.files
-                print(f"  Applied patches: {len(patch_result.applied)}")
-                print(f"  Failed patches: {len(patch_result.failed)}")
-                if patch_result.failed:
-                    self.memory.remember_event(
-                        {
-                            "persona": "Patch Engine",
-                            "score": 0,
-                            "status": "needs_work",
-                            "issues": [
-                                {
-                                    "severity": "high",
-                                    "file": str(patch.get("file", "")),
-                                    "description": "Patch failed to apply mechanically.",
-                                    "suggested_fix": str(patch.get("output", ""))[:1000],
-                                }
-                                for patch in patch_result.failed
-                            ],
-                            "patches": [],
-                        }
-                    )
-
-            if not self.config.skip_verify:
-                print("\nVerifying project...")
-                verification = self.validator.run(plan, files)
-                print(f"  Command: {verification['command'] or 'none'}")
-                print(f"  Exit code: {verification['exit_code']}")
-                if verification["output"]:
-                    print(verification["output"])
-                if verification["exit_code"] != 0:
-                    self.memory.remember_event(
-                        {
-                            "persona": "Validator",
-                            "score": 0,
-                            "status": "needs_work",
-                            "issues": [
-                                {
-                                    "severity": "critical",
-                                    "description": "Verification command failed.",
-                                    "suggested_fix": verification["output"],
-                                }
-                            ],
-                            "patches": [],
-                        }
-                    )
-                    continue
-
-            if not failing_reviews:
-                print("\nAll quality gates passed.")
-                return files
-
-            if iteration == self.config.max_iterations:
-                print("\nMax iterations reached. Returning best available files.")
-                return files
-
-        return files
+    def verify(self, plan: dict[str, Any], files: dict[str, str]) -> bool:
+        self.status("Verifying project...")
+        verification = self.validator.run(plan, files)
+        self.emit("verify", verification)
+        if verification["exit_code"] == 0:
+            return True
+        self.memory.remember_event(
+            {
+                "persona": "Validator",
+                "score": 0,
+                "status": "needs_work",
+                "issues": [
+                    {
+                        "severity": "critical",
+                        "description": "Verification command failed.",
+                        "suggested_fix": verification["output"],
+                    }
+                ],
+                "patches": [],
+            }
+        )
+        return False
 
 
 def print_scorecard(reviews: list[dict]) -> None:
@@ -128,8 +195,8 @@ def print_scorecard(reviews: list[dict]) -> None:
     print("-" * 84)
     for review in reviews:
         print(
-            f"{review.get('persona', 'Unknown')[:30]:30} "
-            f"{int(review.get('score', 0)):>5}  "
+            f"{str(review.get('persona', 'Unknown'))[:30]:30} "
+            f"{str(review.get('score', 0))[:5]:>5}  "
             f"{str(review.get('status', 'unknown'))[:12]:12} "
             f"{str(review.get('confidence', 'unknown'))[:10]:10} "
             f"{len(review.get('patches', [])):>7}"

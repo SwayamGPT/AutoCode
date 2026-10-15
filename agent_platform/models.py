@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -24,6 +24,8 @@ class PipelineConfig:
     max_retrieved_files: int
     skip_verify: bool
     command_timeout_seconds: int
+    mcp_config: str = ""
+    a2a_peers: str = ""
 
 
 @dataclass(frozen=True)
@@ -33,10 +35,9 @@ class PatchApplyResult:
     failed: list[dict[str, Any]]
 
 
-@dataclass
-class ProjectState:
-    requirement: str
-    plan: dict[str, Any]
+@dataclass(frozen=True)
+class RunResult:
     files: dict[str, str]
-    reviews: list[dict[str, Any]] = field(default_factory=list)
-    memory_events: list[dict[str, Any]] = field(default_factory=list)
+    plan: dict[str, Any]
+    reviews: list[dict[str, Any]]
+    passed: bool

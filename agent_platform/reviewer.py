@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, Callable, Protocol
 
-from .llm import OllamaClient, extract_json
+from .llm import OllamaClient, RunCancelled
 from .models import Persona
 from .retriever import RetrieverAgent
 
@@ -74,14 +74,27 @@ Project memory:
 Relevant files:
 {json.dumps(relevant_files, indent=2)}
 """
-        return extract_json(self.llm.ask(system_prompt, user_prompt, persona.name))
+        return self.llm.ask_json(system_prompt, user_prompt, persona.name)
+
+
+class Reviewer(Protocol):
+    name: str
+
+    def run(self, requirement: str, project_memory: dict[str, Any], relevant_files: dict[str, str]) -> dict[str, Any]: ...
 
 
 class ReviewCoordinator:
-    def __init__(self, llm: OllamaClient, personas: tuple[Persona, ...], retriever: RetrieverAgent) -> None:
+    def __init__(
+        self,
+        llm: OllamaClient,
+        personas: tuple[Persona, ...],
+        retriever: RetrieverAgent,
+        remote_reviewers: list[Reviewer] | None = None,
+    ) -> None:
         self.llm = llm
         self.personas = personas
         self.retriever = retriever
+        self.remote_reviewers = remote_reviewers or []
 
     def run(
         self,
@@ -90,9 +103,10 @@ class ReviewCoordinator:
         files: dict[str, str],
         project_memory: dict[str, Any],
         max_retrieved_files: int,
+        on_review: Callable[[dict[str, Any]], None] | None = None,
     ) -> list[dict[str, Any]]:
         reviews: list[dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=len(self.personas)) as executor:
+        with ThreadPoolExecutor(max_workers=len(self.personas) + len(self.remote_reviewers)) as executor:
             futures = {}
             for persona in self.personas:
                 relevant_files = self.retriever.retrieve(
@@ -101,30 +115,36 @@ class ReviewCoordinator:
                 agent = ReviewerAgent(self.llm, persona)
                 future = executor.submit(agent.run, requirement, project_memory, relevant_files)
                 futures[future] = persona.name
+            for remote in self.remote_reviewers:
+                # Peers run their own retrieval, so they get every file.
+                futures[executor.submit(remote.run, requirement, project_memory, files)] = remote.name
 
             for future in as_completed(futures):
                 persona_name = futures[future]
-                print(f"  Finished: {persona_name}")
                 try:
-                    reviews.append(future.result())
+                    review = future.result()
+                    review["persona"] = persona_name
+                except RunCancelled:
+                    raise
                 except Exception as exc:
-                    reviews.append(
-                        {
-                            "persona": persona_name,
-                            "score": 0,
-                            "status": "needs_work",
-                            "confidence": "low",
-                            "issues": [
-                                {
-                                    "severity": "high",
-                                    "file": "",
-                                    "description": f"Reviewer failed: {exc}",
-                                    "suggested_fix": "Retry with smaller context or stricter JSON output.",
-                                }
-                            ],
-                            "patches": [],
-                            "requires_rereview": True,
-                        }
-                    )
+                    review = {
+                        "persona": persona_name,
+                        "score": 0,
+                        "status": "needs_work",
+                        "confidence": "low",
+                        "issues": [
+                            {
+                                "severity": "high",
+                                "file": "",
+                                "description": f"Reviewer failed: {exc}",
+                                "suggested_fix": "Retry with smaller context or stricter JSON output.",
+                            }
+                        ],
+                        "patches": [],
+                        "requires_rereview": True,
+                    }
+                reviews.append(review)
+                if on_review:
+                    on_review(review)
 
         return sorted(reviews, key=lambda item: item.get("persona", ""))
