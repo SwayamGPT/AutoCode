@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import config_from_env, load_env_files
+from .logs import setup_logging
 from .models import PipelineConfig
 from .orchestrator import Orchestrator
 from .workspace import changed_files, file_diff, load_workspace, write_project
@@ -73,6 +74,7 @@ def main(argv: list[str] | None = None) -> None:
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
     load_env_files()
+    setup_logging()
     env_config = config_from_env()
 
     # The packaged app (and `python app.py desktop`) opens the desktop window.

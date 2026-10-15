@@ -9,7 +9,7 @@ import traceback
 from .config import CONFIG_HOME
 from .models import PipelineConfig
 from .runs import RunStore
-from .server import LocalHTTPServer, make_handler
+from .server import RUNS_DIR, LocalHTTPServer, make_handler
 
 LOG_FILE = CONFIG_HOME / "desktop.log"
 WINDOW_SIZE = (1440, 900)
@@ -37,7 +37,7 @@ def run_desktop(config: PipelineConfig) -> None:
     except ImportError as exc:
         raise SystemExit("Desktop mode needs pywebview: pip install -r requirements-desktop.txt") from exc
 
-    httpd = LocalHTTPServer(("127.0.0.1", 0), make_handler(config, RunStore()))
+    httpd = LocalHTTPServer(("127.0.0.1", 0), make_handler(config, RunStore(RUNS_DIR, config)))
     threading.Thread(target=httpd.serve_forever, name="autocode-backend", daemon=True).start()
 
     bridge = DesktopBridge()

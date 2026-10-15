@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import mimetypes
 import shutil
 import socketserver
@@ -13,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .a2a import PARSE_ERROR, A2AServer, agent_card
 from .a2a_client import AGENT_CARD_PATH, peer_name, peer_urls
+from .config import CONFIG_HOME
 from .models import PipelineConfig
 from .personas import PERSONAS
 from .runs import FINISHED, Run, RunStore
@@ -24,6 +26,9 @@ SSE_HEARTBEAT_SECONDS = 15
 FIELD_TYPES = {"str": str, "int": int, "float": float, "bool": bool}
 HEALTH_TIMEOUT_SECONDS = 3
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+RUNS_DIR = CONFIG_HOME / "runs"
+
+http_logger = logging.getLogger("autocode.http")
 MISSING_UI = b"AutoCode UI is not built. Run: npm --prefix ui install && npm --prefix ui run build"
 PAGE_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -94,7 +99,7 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
 
         def log_message(self, format: str, *args: Any) -> None:
             if "/events" not in self.path:
-                super().log_message(format, *args)
+                http_logger.info("%s %s", self.address_string(), format % args)
 
         def send_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
             body = json.dumps(payload).encode("utf-8")
@@ -303,7 +308,7 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
 
 
 def serve(config: PipelineConfig, host: str, port: int) -> None:
-    server = LocalHTTPServer((host, port), make_handler(config, RunStore()))
+    server = LocalHTTPServer((host, port), make_handler(config, RunStore(RUNS_DIR, config)))
     print(f"AutoCode UI running at http://{host}:{port}  (model: {config.model}, ollama: {config.ollama_host})")
     print(f"A2A agent card: http://{host}:{port}{AGENT_CARD_PATH}")
     try:

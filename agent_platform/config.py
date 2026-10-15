@@ -8,6 +8,9 @@ from .models import PipelineConfig
 
 T = TypeVar("T")
 
+# AUTOCODE_HOME relocates settings, logs and run history (tests point it at a temp dir).
+CONFIG_HOME = Path(os.environ.get("AUTOCODE_HOME") or Path.home() / ".autocode")
+
 DEFAULTS = {
     "OLLAMA_MODEL": "qwen3:4b",
     "OLLAMA_HOST": "http://localhost:11434",
@@ -19,13 +22,10 @@ DEFAULTS = {
     "MAX_RETRIEVED_FILES": "5",
     "SKIP_VERIFY": "false",
     "COMMAND_TIMEOUT_SECONDS": "60",
-    "MCP_CONFIG": str(Path.home() / ".autocode" / "mcp.json"),
+    "MCP_CONFIG": str(CONFIG_HOME / "mcp.json"),
     "A2A_PEERS": "",
     "FAST_MODE": "false",
 }
-
-
-CONFIG_HOME = Path.home() / ".autocode"
 
 
 def load_env_files() -> None:
