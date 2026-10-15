@@ -17,10 +17,11 @@ from .models import PipelineConfig
 from .orchestrator import Orchestrator
 from .personas import PERSONAS
 from .workspace import changed_files, file_diff, load_workspace, write_project
+from .config import setting
 
 SUPPORTED_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 SERVER_INFO = {"name": "autocode", "title": "AutoCode", "version": "1.0.0"}
-MAX_DIFF_CHARS = 20_000
+MAX_DIFF_CHARS = setting("MCP_MAX_DIFF_CHARS", 20_000)
 INVALID_PARAMS = -32602
 METHOD_NOT_FOUND = -32601
 INTERNAL_ERROR = -32603

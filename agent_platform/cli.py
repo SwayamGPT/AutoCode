@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from .config import config_from_env, load_env_files
+from .config import config_from_env, load_env_files, setting
 from .logs import setup_logging
 from .settings import apply_saved_settings
 from .models import PipelineConfig
@@ -63,8 +63,8 @@ def build_parser(env_config: PipelineConfig) -> argparse.ArgumentParser:
 
 def build_serve_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="app.py serve", description="Start the AutoCode web UI.")
-    parser.add_argument("--host", default=os.environ.get("UI_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("UI_PORT", "8000")))
+    parser.add_argument("--host", default=setting("UI_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=setting("UI_PORT", 8000))
     return parser
 
 

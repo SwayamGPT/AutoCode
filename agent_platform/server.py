@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .a2a import PARSE_ERROR, A2AServer, agent_card
 from .a2a_client import AGENT_CARD_PATH, peer_name, peer_urls
-from .config import CONFIG_HOME
+from .config import CONFIG_HOME, setting
 from .memory_store import open_store
 from .models import PipelineConfig
 from .personas import PERSONAS
@@ -23,8 +23,8 @@ from .settings import A2A_LOCKED, RUN_LOCKED, coerce_settings, mask_settings, sa
 from .workspace import changed_files, load_workspace, write_project
 
 STATIC_DIR = Path(__file__).parent / "static"
-MAX_BODY_BYTES = 1_000_000
-SSE_HEARTBEAT_SECONDS = 15
+MAX_BODY_BYTES = setting("MAX_REQUEST_BYTES", 1_000_000)
+SSE_HEARTBEAT_SECONDS = setting("SSE_HEARTBEAT_SECONDS", 15)
 MEMORY_PAGE_LIMIT = 200
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 RUNS_DIR = CONFIG_HOME / "runs"

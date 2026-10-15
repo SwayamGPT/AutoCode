@@ -18,14 +18,14 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from .config import CONFIG_HOME
+from .config import CONFIG_HOME, setting
 
 logger = logging.getLogger("autocode.memory")
 
 HASH_EMBEDDING = "hash-256"
 HASH_DIMENSIONS = 256
-PG_CONNECT_TIMEOUT = 3
-SEARCH_CANDIDATES = 2000  # sqlite scans at most this many recent rows of one embedding model
+PG_CONNECT_TIMEOUT = setting("PG_CONNECT_TIMEOUT", 3)
+SEARCH_CANDIDATES = setting("MEMORY_SEARCH_CANDIDATES", 2000)  # sqlite scans at most this many recent rows of one embedding model
 
 
 @dataclass(frozen=True)

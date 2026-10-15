@@ -7,9 +7,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .config import setting
 from .workspace import write_project
 
 TIMEOUT_EXIT_CODE = 124
+COMMAND_OUTPUT_CHARS = setting("COMMAND_OUTPUT_CHARS", 4000)  # tail of test output kept
 
 
 def python_executable() -> str | None:
@@ -34,7 +36,7 @@ def run_command(command: str, cwd: Path, timeout_seconds: int) -> tuple[int, str
     except subprocess.TimeoutExpired:
         return TIMEOUT_EXIT_CODE, f"Timed out after {timeout_seconds}s."
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
-    return completed.returncode, output[-4000:]
+    return completed.returncode, output[-COMMAND_OUTPUT_CHARS:]
 
 
 class Validator:

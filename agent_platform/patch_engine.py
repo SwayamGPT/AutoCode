@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from .models import PatchApplyResult
+from .config import setting
 from .workspace import is_safe_relative_path, write_project
 
 TIMEOUT_EXIT_CODE = 124
+COMMAND_OUTPUT_CHARS = setting("COMMAND_OUTPUT_CHARS", 4000)  # tail of test output kept
 
 
 def collect_patches(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -49,7 +51,7 @@ def run_process(
     except subprocess.TimeoutExpired:
         return TIMEOUT_EXIT_CODE, f"Timed out after {timeout_seconds}s."
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
-    return completed.returncode, output[-4000:]
+    return completed.returncode, output[-COMMAND_OUTPUT_CHARS:]
 
 
 class PatchEngine:

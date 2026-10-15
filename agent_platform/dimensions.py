@@ -13,10 +13,11 @@ from typing import Any, Callable
 from .generator import context_files
 from .llm import LLMClient, normalize_files
 from .models import Persona
+from .config import setting
 
-MAX_ITEMS = 8
-MAX_ITEM_CHARS = 300
-IMPLEMENT_CONTEXT_CHARS = 20_000
+MAX_ITEMS = setting("PLAN_MAX_ITEMS", 8)
+MAX_ITEM_CHARS = setting("PLAN_MAX_ITEM_CHARS", 300)
+IMPLEMENT_CONTEXT_CHARS = setting("IMPLEMENT_CONTEXT_CHARS", 20_000)
 
 PLAN_SYSTEM_PROMPT = """
 You are the {name} lead on a software team. Your dimension: {mission}

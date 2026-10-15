@@ -15,16 +15,18 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from .config import setting
 
 OLLAMA = "ollama"
 OPENAI_COMPATIBLE = "openai"
 ANTHROPIC = "anthropic"
 
-HTTP_RETRIES = 3
+HTTP_RETRIES = setting("HTTP_RETRIES", 3)
 RETRY_BASE_SECONDS = 1.0
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
-ANTHROPIC_MAX_TOKENS = 16_000
+ANTHROPIC_MAX_TOKENS = setting("ANTHROPIC_MAX_TOKENS", 16_000)
 ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+ANTHROPIC_FALLBACKS = setting("ANTHROPIC_FALLBACKS", True)  # retry safety-declined requests on a fallback model
 
 # name -> (type, base_url, api-key env var, example model). Users can override any of these, or add
 # their own OpenAI-compatible endpoints, in settings.
@@ -90,7 +92,9 @@ def provider_configs(providers_json: str, ollama_host: str) -> dict[str, Provide
     for name in sorted(set(PRESETS) | set(overrides)):
         preset = PRESETS.get(name, {"type": OPENAI_COMPATIBLE, "base_url": "", "key_env": ""})
         override = overrides.get(name) if isinstance(overrides.get(name), dict) else {}
-        base_url = str(override.get("base_url") or (ollama_host if name == OLLAMA else preset["base_url"]))
+        # <NAME>_BASE_URL (e.g. OPENAI_BASE_URL, GROQ_BASE_URL) points a preset at a proxy or mirror.
+        env_url = os.environ.get(f"{name.upper()}_BASE_URL", "")
+        base_url = str(override.get("base_url") or env_url or (ollama_host if name == OLLAMA else preset["base_url"]))
         api_key = str(override.get("api_key") or (os.environ.get(preset["key_env"], "") if preset["key_env"] else ""))
         configs[name] = ProviderConfig(name, str(override.get("type") or preset["type"]), base_url.rstrip("/"), api_key)
     return configs
@@ -242,13 +246,13 @@ class AnthropicProvider:
         # Current Claude models take no sampling parameters, so temperature is not sent. JSON comes from the
         # prompt (every agent prompt demands a JSON object) and is parsed tolerantly by extract_json.
         # Server-side fallbacks re-run a safety-declined request on another model inside the same call.
+        fallback: dict[str, Any] = {"betas": [ANTHROPIC_FALLBACK_BETA], "fallbacks": "default"} if ANTHROPIC_FALLBACKS else {}
         response = self.client.beta.messages.create(
             model=model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
             system=system + ("\nRespond with a single JSON object and nothing else." if json_mode else ""),
             messages=[{"role": "user", "content": user}],
-            betas=[ANTHROPIC_FALLBACK_BETA],
-            fallbacks="default",
+            **fallback,
         )
         if response.stop_reason == "refusal":
             raise ProviderError(f"{model} declined the request.")

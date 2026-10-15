@@ -7,9 +7,10 @@ from typing import Any, Callable
 
 from .llm import LLMClient
 from .mcp_client import McpClient, McpError, load_mcp_servers
+from .config import setting
 
-MAX_TOOL_CALLS = 3
-MAX_RESULT_CHARS = 4000
+MAX_TOOL_CALLS = setting("MCP_MAX_TOOL_CALLS", 3)
+MAX_RESULT_CHARS = setting("MCP_MAX_RESULT_CHARS", 4000)
 MAX_DESCRIPTION_CHARS = 300
 
 SYSTEM_PROMPT = """

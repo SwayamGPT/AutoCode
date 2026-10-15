@@ -129,3 +129,40 @@ def test_coerce_settings_validates_types() -> None:
 def test_extract_json_roundtrip_large() -> None:
     payload = {"files": {f"f{i}.py": "x" * 100 for i in range(50)}}
     assert extract_json(json.dumps(payload)) == payload
+
+
+def test_setting_casts_to_the_default_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_platform.config import setting
+
+    monkeypatch.setenv("X_INT", "42")
+    monkeypatch.setenv("X_FLOAT", "0.5")
+    monkeypatch.setenv("X_BOOL", "no")
+    monkeypatch.setenv("X_EMPTY", "")
+    assert setting("X_INT", 1) == 42
+    assert setting("X_FLOAT", 0.1) == 0.5
+    assert setting("X_BOOL", True) is False
+    assert setting("X_EMPTY", 7) == 7 and setting("X_MISSING", "d") == "d"
+    monkeypatch.setenv("X_INT", "lots")
+    with pytest.raises(RuntimeError, match="X_INT"):
+        setting("X_INT", 1)
+
+
+def test_env_file_loading_never_overrides_real_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_platform.config import load_env_file
+
+    env = tmp_path / ".env"
+    env.write_text('# comment\nAC_TEST_A="from file"\nAC_TEST_B=from file\nnot a line\n')
+    monkeypatch.setenv("AC_TEST_B", "real")
+    monkeypatch.delenv("AC_TEST_A", raising=False)
+    load_env_file(str(env))
+    import os
+
+    assert os.environ["AC_TEST_A"] == "from file" and os.environ["AC_TEST_B"] == "real"
+    monkeypatch.delenv("AC_TEST_A")
+
+
+def test_provider_base_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_platform.providers import provider_configs
+
+    monkeypatch.setenv("GROQ_BASE_URL", "http://proxy.local/v1/")
+    assert provider_configs("", "")["groq"].base_url == "http://proxy.local/v1"

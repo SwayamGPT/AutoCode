@@ -23,6 +23,7 @@ from typing import Any, Callable
 from .llm import LLMClient
 from .memory_store import HASH_EMBEDDING, Memory, MemoryStore, hash_embedding
 from .providers import build_provider, parse_spec, provider_configs
+from .config import setting
 
 logger = logging.getLogger("autocode.learning")
 
@@ -41,10 +42,10 @@ STRATEGIES: dict[str, dict[str, Any]] = {
     },
 }
 GENERAL = "General"
-RECALL_PER_DIMENSION = 3
-MIN_SIMILARITY = 0.25
-MAX_LESSONS = 20
-MAX_LESSON_CHARS = 400
+RECALL_PER_DIMENSION = setting("RECALL_PER_DIMENSION", 3)
+MIN_SIMILARITY = setting("RECALL_MIN_SIMILARITY", 0.25)
+MAX_LESSONS = setting("MAX_LESSONS_PER_RUN", 20)
+MAX_LESSON_CHARS = setting("MAX_LESSON_CHARS", 400)
 DUPLICATE_SCAN = 20
 
 REFLECT_PROMPT = """

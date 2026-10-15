@@ -7,8 +7,9 @@ import time
 from typing import Any, Callable
 
 from .providers import Provider
+from .config import setting
 
-JSON_RETRIES = 1
+JSON_RETRIES = setting("LLM_JSON_RETRIES", 1)
 
 
 class RunCancelled(Exception):

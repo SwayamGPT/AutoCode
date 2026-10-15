@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 
 from .llm import LLMClient, normalize_files
+from .config import setting
 
-MAX_CONTEXT_CHARS = 24_000
+MAX_CONTEXT_CHARS = setting("GENERATOR_CONTEXT_CHARS", 24_000)
 
 SYSTEM_PROMPT = """
 You are a senior code generator.

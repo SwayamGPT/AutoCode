@@ -63,3 +63,7 @@ There is no formatter config; `ruff check agent_platform tests --select F,E9,B` 
 ## Control flow (LangGraph)
 
 `graph.py` compiles a `StateGraph(PipelineState)`; `Orchestrator.run()` only checks models, creates `self.trace` and calls `run_pipeline`. Nodes wrap orchestrator methods (`make_plan`, `build_foundation`, `implement_dimensions`, `verify`, `fix`, `review_round`, `apply_patches`) and emit a `node` event first. Branching lives only in the conditional edges (fast mode, failed verify → `fix`, review → `patch` or `finish`). `PipelineState` hints are evaluated at runtime by LangGraph, so do not use `TYPE_CHECKING`-only types there. The recursion limit is `FIXED_STEPS + 4 * max_iterations`. Tests assert the exact node path (`tests/test_orchestrator.py`).
+
+## Environment settings
+
+`config.py` loads `./.env` then `AUTOCODE_HOME/.env` at import time (`setdefault`, so real env vars win), before anything reads the environment; `agent_platform/__init__` importing anything pulls it in. Module-level limits use `setting("NAME", default)`, which casts to the default's type (bools via `parse_bool`) and treats empty values as unset. When adding a tunable, use `setting(...)` and document it in `.env.example` (grouped by area). Preset base URLs can be overridden with `<NAME>_BASE_URL`.

@@ -14,10 +14,11 @@ from .llm import RunCancelled
 from .models import PipelineConfig
 from .orchestrator import Orchestrator
 from .workspace import changed_files, file_diff, load_workspace
+from .config import setting
 
 FINISHED = {"done", "error", "cancelled"}
 WAIT_POLL_SECONDS = 1.0
-MAX_SAVED_RUNS = 50
+MAX_SAVED_RUNS = setting("MAX_SAVED_RUNS", 50)
 EMPTY_METRICS = {"llm_calls": 0, "prompt_tokens": 0, "output_tokens": 0, "llm_seconds": 0.0}
 
 logger = logging.getLogger("autocode.runs")

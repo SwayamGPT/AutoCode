@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 from pathlib import Path
+from .config import setting
 
 IGNORED_DIRS = {
     ".git",
@@ -19,8 +20,10 @@ IGNORED_DIRS = {
     ".idea",
     ".vscode",
 }
-MAX_FILE_BYTES = 200_000
-MAX_WORKSPACE_FILES = 400
+# WORKSPACE_IGNORE adds comma-separated folder names to skip when reading a project.
+IGNORED_DIRS = IGNORED_DIRS | {name.strip() for name in setting("WORKSPACE_IGNORE", "").split(",") if name.strip()}
+MAX_FILE_BYTES = setting("WORKSPACE_MAX_FILE_BYTES", 200_000)
+MAX_WORKSPACE_FILES = setting("WORKSPACE_MAX_FILES", 400)
 
 
 def is_safe_relative_path(path: str) -> bool:

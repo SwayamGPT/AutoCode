@@ -11,9 +11,10 @@ from .learning import STRATEGIES, Embedder
 from .memory_store import open_store
 from .models import PipelineConfig
 from .providers import OLLAMA, PRESETS, OllamaProvider, build_provider, parse_spec, provider_configs
+from .config import setting
 
-HEALTH_TIMEOUT_SECONDS = 3
-PULL_TIMEOUT_SECONDS = 3600
+HEALTH_TIMEOUT_SECONDS = setting("HEALTH_TIMEOUT_SECONDS", 3)
+PULL_TIMEOUT_SECONDS = setting("MODEL_PULL_TIMEOUT_SECONDS", 3600)
 ROLE_FIELDS = {"planner": "planner_model", "coder": "coder_model", "reviewer": "reviewer_model", "critic": "critic_model"}
 
 

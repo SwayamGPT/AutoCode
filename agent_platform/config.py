@@ -8,8 +8,37 @@ from .models import PipelineConfig
 
 T = TypeVar("T")
 
-# AUTOCODE_HOME relocates settings, logs and run history (tests point it at a temp dir).
-CONFIG_HOME = Path(os.environ.get("AUTOCODE_HOME") or Path.home() / ".autocode")
+def load_env_file(path: str = ".env") -> None:
+    env_path = Path(path).expanduser()
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+# .env files load when the package is imported, so every setting below (and module-level limits elsewhere)
+# sees them. Real environment variables always win (setdefault). Order: ./.env, then AUTOCODE_HOME/.env.
+load_env_file(".env")
+# AUTOCODE_HOME relocates settings, logs, memory and run history (tests point it at a temp dir).
+CONFIG_HOME = Path(os.environ.get("AUTOCODE_HOME") or Path.home() / ".autocode").expanduser()
+load_env_file(str(CONFIG_HOME / ".env"))
+
+
+def setting(name: str, default: T) -> T:
+    """An env-tunable limit: `NAME=value` overrides `default`, cast to the default's type."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        if isinstance(default, bool):
+            return parse_bool(raw)  # type: ignore[return-value]
+        return type(default)(raw)  # type: ignore[call-arg]
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid value for {name}: {raw!r}") from exc
 
 DEFAULTS = {
     "OLLAMA_MODEL": "qwen3:4b",
@@ -37,24 +66,9 @@ DEFAULTS = {
 
 
 def load_env_files() -> None:
-    """Project .env first, then ~/.autocode/.env (used by the packaged app). Real env vars win over both."""
+    """Kept for callers that reload after changing directory; loading is idempotent."""
     load_env_file(".env")
     load_env_file(str(CONFIG_HOME / ".env"))
-
-
-def load_env_file(path: str = ".env") -> None:
-    env_path = Path(path)
-    if not env_path.exists():
-        return
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
 
 
 def env_value(name: str, parse: Callable[[str], T]) -> T:

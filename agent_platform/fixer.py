@@ -7,9 +7,10 @@ from typing import Any
 
 from .generator import context_files
 from .llm import LLMClient, normalize_files
+from .config import setting
 
-FIX_CONTEXT_CHARS = 20_000
-MAX_OUTPUT_CHARS = 4_000
+FIX_CONTEXT_CHARS = setting("FIX_CONTEXT_CHARS", 20_000)
+MAX_OUTPUT_CHARS = setting("FIX_OUTPUT_CHARS", 4_000)
 MENTIONED_PATH_LIMIT = 20
 
 SYSTEM_PROMPT = """

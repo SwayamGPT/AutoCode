@@ -163,7 +163,7 @@ Set `A2A_PEERS=http://127.0.0.1:8001,...` (or use the UI settings) to add other 
 
 ## Configuration
 
-Every option can be set with an environment variable (see `.env.example`), a CLI flag, or the UI settings panel:
+Every option can be set in `.env` (copy `.env.example`; it documents about 60 settings with their defaults), with an environment variable, a CLI flag, or the Settings screen. Precedence: defaults < `.env` < environment < saved settings. Main CLI flags:
 
 | Flag | Purpose |
 |---|---|

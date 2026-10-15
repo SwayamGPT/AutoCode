@@ -6,14 +6,14 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from .config import CONFIG_HOME
+from .config import CONFIG_HOME, setting
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(threadName)s %(message)s"
-MAX_LOG_BYTES = 2_000_000
-LOG_BACKUPS = 3
+MAX_LOG_BYTES = setting("LOG_MAX_BYTES", 2_000_000)
+LOG_BACKUPS = setting("LOG_BACKUPS", 3)
 
 
-def setup_logging(level: int = logging.INFO) -> Path | None:
+def setup_logging(level: int | None = None) -> Path | None:
     """Attach a rotating file handler to the `autocode` logger. Returns the log path, or None if unwritable."""
     log_file = CONFIG_HOME / "logs" / "autocode.log"
     logger = logging.getLogger("autocode")
@@ -26,5 +26,6 @@ def setup_logging(level: int = logging.INFO) -> Path | None:
         return None
     handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logger.addHandler(handler)
-    logger.setLevel(level)
+    # LOG_LEVEL: DEBUG, INFO (default), WARNING or ERROR.
+    logger.setLevel(level if level is not None else getattr(logging, setting("LOG_LEVEL", "INFO").upper(), logging.INFO))
     return log_file
