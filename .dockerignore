@@ -1,5 +1,11 @@
 .git
 .agents
+.env
+.venv
 __pycache__/
 *.pyc
-.env
+.pytest_cache
+build
+dist
+agent_platform/static
+ui/node_modules
