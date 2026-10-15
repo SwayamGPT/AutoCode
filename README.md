@@ -1,6 +1,6 @@
 # AutoCode — Autonomous Local Coding Agent
 
-AutoCode is a multi-agent, self-verifying code generator that runs entirely against a **local LLM via Ollama**, with no external API keys. Give it a plain-language requirement, or point it at an existing project, and it plans, writes, critiques, patches, and runs the code in a closed loop until it passes or hits a retry limit.
+AutoCode is a multi-agent, self-verifying code generator. It runs against **local models** (Ollama, LM Studio, vLLM) or **hosted ones** (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together, or any OpenAI-compatible endpoint), and you can mix them per step. Give it a plain-language requirement, or point it at an existing project. It plans, writes, critiques, patches, fixes, and runs the code in a closed loop until it passes or hits a retry limit. It **remembers and learns** from every run.
 
 It ships as an **installable desktop app** (a native window, not a website), a CLI, an **MCP server** that Claude Code or Cursor can call, and an **A2A agent** that other agents can delegate to.
 
@@ -138,12 +138,39 @@ Every option can be set with an environment variable (see `.env.example`), a CLI
 - The HTTP server binds to `127.0.0.1` by default. It rejects cross-origin writes and foreign `Host` headers (DNS rebinding). It has no authentication, so do not expose it to a network.
 - Patch and write paths are confined to the project folder (no absolute paths or `..`).
 
-## Docker
+## Memory and learning
+
+AutoCode improves with use without retraining any model:
+
+- **Memory (Postgres + pgvector).** After every run, a critic agent looks at what each step planned, changed, and scored. It writes concrete lessons about what that step should do better next time. Lessons are embedded with a neural embedding model (`nomic-embed-text` by default) and stored in Postgres with pgvector. Before the next similar task, the most relevant lessons are recalled into the planning, implementation, and fix prompts. Duplicate lessons are skipped.
+- **Reinforcement learning.** Each dimension's implementation step picks a strategy (focused, thorough, or test-first) by Thompson sampling over a Beta posterior per dimension and strategy. The reward is that dimension's final review score, so the strategies that work for each dimension get chosen more often.
+- **Fixer agent.** When the test command fails, a debugging agent reads the failure, repairs the code, and verifies again before the reviewers see it.
+
+The **Memory** tab shows what AutoCode has learned and the score of each strategy for each dimension. You can search lessons, forget single lessons, or clear everything. Turn learning off in Settings.
+
+What this is not: the language model's weights are never fine-tuned. Learning lives in the memory and in the strategy policy around the model, so it works the same with any local or hosted model. If no Postgres is configured, memory uses a local SQLite file. If the embedding model is unavailable, it falls back to keyword hashing.
+
+## Models
+
+Every model is a `<provider>:<model>` spec, such as `ollama:qwen3:4b`, `openai:gpt-5-mini`, `anthropic:claude-opus-5-5`, or `gemini:gemini-2.5-flash`. Set the default model, plus an optional model per role (planning, coding, reviewing, reflection), in **Settings**. A common mix is a strong hosted planner with fast local reviewers. Add any OpenAI-compatible server as a custom provider.
+
+API keys are read from the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, ...) or pasted in Settings. Pasted keys are saved to `~/.autocode/settings.json` with `0600` permissions and are never sent back to the UI in full. Single runs, and remote A2A agents, cannot change providers, base URLs, or the memory database, so a request cannot redirect your keys.
+
+Anthropic models go through the official SDK with server-side refusal fallback enabled (`fallbacks: "default"`), so a safety-declined request is retried on a fallback model within the same call.
+
+## Docker (zero configuration)
 
 ```bash
-cp .env.example .env
-docker compose up          # Ollama + model pull + AutoCode UI/A2A at http://127.0.0.1:8000
+./scripts/start.sh         # or: docker compose up -d --build
 ```
+
+This one command starts everything, with no `.env` needed:
+
+- **Ollama**, which downloads the chat model (`qwen3:4b`) and the embedding model (`nomic-embed-text`)
+- **Postgres 17 with pgvector** for memory
+- **AutoCode** at http://127.0.0.1:8000
+
+Settings, history, and logs persist in Docker volumes. Hosted-model keys set in your shell are passed through. While this stack is running, the desktop app finds the Postgres memory on its own. The first start downloads several GB of models.
 
 ## Tests
 
@@ -153,7 +180,7 @@ python -m pytest           # backend, MCP, A2A, HTTP API (uses a scripted fake L
 npm --prefix ui test       # UI state reducer
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs ruff and pytest on Python 3.11 and 3.13, then the UI typecheck, tests, and build.
+GitHub Actions (`.github/workflows/ci.yml`) runs ruff and pytest on Python 3.11 and 3.13 against a pgvector Postgres service, then the UI typecheck, tests, and build. Locally, the pgvector test runs when `TEST_DATABASE_URL` points at a Postgres with pgvector (for example the compose one).
 
 ## Project structure
 
@@ -168,7 +195,13 @@ AutoCode/
 │   ├── planner.py / generator.py / reviewer.py / retriever.py
 │   ├── context_agent.py      # MCP tool selection before planning
 │   ├── patch_engine.py / validator.py / memory.py / workspace.py
-│   ├── llm.py                # Ollama client (JSON mode, retry, cancellation)
+│   ├── providers.py          # Ollama, OpenAI-compatible and Anthropic providers
+│   ├── llm.py                # Per-role model clients (JSON mode, retry, cancellation, metrics)
+│   ├── settings.py           # Settings saved from the app (masked keys, locked fields)
+│   ├── memory_store.py       # pgvector / SQLite memory and strategy statistics
+│   ├── learning.py           # Recall, reflection critic, Thompson-sampling strategy policy
+│   ├── fixer.py              # Repairs failing tests before review
+│   ├── services.py           # Health checks, model downloads, memory/learning views
 │   ├── runs.py               # Background runs, event log, metrics, saved history
 │   ├── logs.py               # Rotating file log
 │   ├── server.py             # HTTP API, SSE events, static UI, A2A routes
