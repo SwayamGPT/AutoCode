@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api } from "./api";
 import { ApplyBar } from "./components/ApplyBar";
 import { Composer } from "./components/Composer";
 import { Editor } from "./components/Editor";
 import { FileTree } from "./components/FileTree";
 import { MemoryView } from "./components/MemoryView";
+import { PipelineStrip } from "./components/PipelineStrip";
 import { PlanView } from "./components/PlanView";
 import { ReviewerGauge } from "./components/ReviewerGauge";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -29,6 +30,24 @@ export default function App() {
   const [pulls, setPulls] = useState<PullProgress[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [requirement, setRequirement] = useState("");
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Ctrl/Cmd+K focuses the request box, Ctrl/Cmd+, opens settings.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key === "k") {
+        event.preventDefault();
+        promptRef.current?.focus();
+      } else if (event.key === ",") {
+        event.preventDefault();
+        setSettingsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [error, setError] = useState("");
 
   const guard = useCallback(async (action: () => Promise<void>) => {
@@ -164,6 +183,10 @@ export default function App() {
               onOpenFile={(path) => dispatch({ type: "select", path })}
             />
           }
+          onExample={(example) => {
+            setRequirement(example);
+            promptRef.current?.focus();
+          }}
           memoryView={
             <MemoryView
               dimensions={state.personas.filter((name) => !name.startsWith("Peer "))}
@@ -193,6 +216,13 @@ export default function App() {
               {status ? STATUS_LABELS[status] : ""}
             </span>
           </div>
+          <PipelineStrip
+            current={state.node}
+            visited={state.visited}
+            iteration={state.iteration}
+            maxIterations={config?.max_iterations ?? 0}
+            running={status === "running"}
+          />
           <ReviewerGauge personas={state.personas} reviews={state.reviews} passingScore={state.passingScore} />
           <Timeline log={state.log} startedAt={state.run?.startedAt} />
           {state.run && status !== "running" && changed > 0 && (
@@ -201,7 +231,10 @@ export default function App() {
           <Composer
             config={config}
             running={status === "running"}
-            onRun={(requirement, settings) => void startRun(requirement, settings)}
+            requirement={requirement}
+            onRequirement={setRequirement}
+            inputRef={promptRef}
+            onRun={(text, settings) => void startRun(text, settings)}
             onCancel={() =>
               void guard(async () => {
                 if (!state.run) return;

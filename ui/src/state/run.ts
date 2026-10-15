@@ -29,6 +29,9 @@ export interface RunState {
   strategies: Record<string, string>; // dimension -> strategy chosen by the learning policy
   recalled: Record<string, string[]>; // dimension -> lessons recalled from memory
   learned: Lesson[]; // lessons written by the critic after the run
+  node: string | null; // current LangGraph node
+  visited: string[];
+  iteration: number;
   log: LogEntry[];
   run: { id: string; startedAt: number; status: RunStatus; passed: boolean } | null;
 }
@@ -62,6 +65,9 @@ export const initialState: RunState = {
   strategies: {},
   recalled: {},
   learned: [],
+  node: null,
+  visited: [],
+  iteration: 0,
   log: [],
   run: null,
 };
@@ -71,6 +77,7 @@ export const EVENT_KINDS = [
   "status",
   "llm_call",
   "llm_done",
+  "node",
   "plan",
   "dimension_plan",
   "dimension_change",
@@ -112,6 +119,9 @@ function freshRun(state: RunState, id: string, startedAt: number): RunState {
     strategies: {},
     recalled: {},
     learned: [],
+    node: null,
+    visited: [],
+    iteration: 0,
     log: [],
     autoSelect: true,
     run: { id, startedAt, status: "running", passed: false },
@@ -206,6 +216,13 @@ function applyEvent(state: RunState, event: RunEvent): RunState {
         .join("\n\n");
       return { ...log(text, "muted", detail ? { detail } : {}), recalled: lessons };
     }
+    case "node": {
+      const node = String(data.node);
+      const visited = state.visited.includes(node) ? state.visited : [...state.visited, node];
+      // The node event reports the round before `verify` starts the next one.
+      const iteration = node === "verify" ? Number(data.iteration) + 1 : state.iteration;
+      return { ...state, node, visited, iteration };
+    }
     case "strategy":
       return { ...state, strategies: { ...state.strategies, [data.dimension]: data.strategy } };
     case "fix": {
@@ -224,7 +241,10 @@ function applyEvent(state: RunState, event: RunEvent): RunState {
     }
     case "reflection": {
       const lessons = data.lessons as Lesson[];
-      const next = log(`Learned ${lessons.length} lessons for next time`, "ok", {
+      const text = lessons.length
+        ? `Learned ${lessons.length} lessons for next time`
+        : "Nothing new to learn: these lessons are already in memory";
+      const next = log(text, lessons.length ? "ok" : "muted", {
         detail: [data.summary, ...lessons.map((l) => `${l.dimension} (${l.step}): ${l.lesson}`)].join("\n"),
       });
       return { ...next, learned: lessons };

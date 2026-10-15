@@ -116,6 +116,18 @@ describe("memory and learning events", () => {
   });
 });
 
+describe("pipeline graph events", () => {
+  it("tracks the current node, visited nodes and the review round", () => {
+    let state = started();
+    for (const [node, iteration] of [["recall", 0], ["plan", 0], ["verify", 0], ["review", 1], ["patch", 1], ["verify", 1]] as const) {
+      state = reducer(state, { type: "event", event: event("node", { node, iteration }) });
+    }
+    expect(state.node).toBe("verify");
+    expect(state.visited).toEqual(["recall", "plan", "verify", "review", "patch"]);
+    expect(state.iteration).toBe(2);
+  });
+});
+
 describe("tree helpers", () => {
   it("nests paths with directories first", () => {
     const tree = buildTree(["z.py", "src/b.py", "src/a.py"]);

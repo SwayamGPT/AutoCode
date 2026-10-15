@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import type { Config, RunSettings } from "../types";
 
 interface Props {
@@ -6,6 +6,9 @@ interface Props {
   running: boolean;
   onRun: (requirement: string, settings: Partial<RunSettings>) => void;
   onCancel: () => void;
+  requirement: string;
+  onRequirement: (text: string) => void;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
 }
 
 type NumberField = "max_iterations" | "passing_score" | "temperature";
@@ -22,8 +25,7 @@ function runDefaults(config: Config): Partial<RunSettings> {
 }
 
 /** The request box. Run options apply to this run only; everything else lives in Settings. */
-export function Composer({ config, running, onRun, onCancel }: Props) {
-  const [requirement, setRequirement] = useState("");
+export function Composer({ config, running, onRun, onCancel, requirement, onRequirement, inputRef }: Props) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<Partial<RunSettings>>({});
   useEffect(() => {
@@ -44,8 +46,9 @@ export function Composer({ config, running, onRun, onCancel }: Props) {
   return (
     <form className="composer" onSubmit={submit}>
       <textarea
+        ref={inputRef}
         value={requirement}
-        onChange={(e) => setRequirement(e.target.value)}
+        onChange={(e) => onRequirement(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder="Add a /health endpoint that reports DB status, with a test"
         aria-label="Request"
