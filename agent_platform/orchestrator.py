@@ -128,6 +128,7 @@ class Orchestrator:
         self.review_coordinator = ReviewCoordinator(reviewer_llm, PERSONAS, RetrieverAgent(), peers)
         self.local_review_coordinator = ReviewCoordinator(reviewer_llm, PERSONAS, RetrieverAgent())
         self.learner = self.build_learner() if config.learning else None
+        self.trace = RunTrace("", run_id=run_id)
         self.patch_engine = PatchEngine(timeout_seconds=config.command_timeout_seconds)
         self.validator = Validator(timeout_seconds=config.command_timeout_seconds)
 
@@ -157,20 +158,18 @@ class Orchestrator:
                 client.ensure_ready()
 
     def run(self, requirement: str, existing_files: dict[str, str] | None = None) -> RunResult:
-        existing_files = existing_files or {}
+        """Run the full pipeline; control flow lives in the LangGraph state machine (graph.py)."""
+        from .graph import run_pipeline
+
         self.ensure_ready()
-        trace = RunTrace(requirement, run_id=self.run_id)
-        lessons = self.learner.recall(requirement, [p.name for p in PERSONAS]) if self.learner else {}
+        self.trace = RunTrace(requirement, run_id=self.run_id)
+        return run_pipeline(self, requirement, existing_files or {})
 
-        context = self.context_agent.gather(requirement, existing_files)
-        planner_context = context
-        if lessons.get(GENERAL):
-            planner_context += f"\n\nLessons from similar past tasks:\n{format_lessons(lessons[GENERAL])}"
-        plan = self.make_plan(requirement, existing_files, planner_context, lessons)
-        trace.plans = plan["dimensions"]
-
+    def build_foundation(
+        self, requirement: str, plan: dict[str, Any], existing_files: dict[str, str], context: str
+    ) -> dict[str, str]:
         self.status("Generating the foundation..." if not self.config.fast_mode else "Generating all dimensions...")
-        strategy = self.choose_strategy(PERSONAS[0].name, trace)
+        strategy = self.choose_strategy(PERSONAS[0].name, self.trace)
         focus = FAST_FOCUS if self.config.fast_mode else FOUNDATION_FOCUS
         if strategy:
             focus += f"\nApproach: {strategy['instruction']}"
@@ -179,14 +178,7 @@ class Orchestrator:
         )
         files = merge_files(existing_files, generated)
         self.emit("files", {"files": files, "stage": "generated"})
-
-        if not self.config.fast_mode:
-            files = self.implement_dimensions(requirement, plan, files, lessons, trace)
-
-        result = self.review_loop(requirement, plan, files, lessons, trace)
-        if self.learner:
-            self.learner.learn(trace, result.reviews, result.passed)
-        return result
+        return files
 
     def choose_strategy(self, dimension: str, trace: RunTrace) -> dict[str, Any] | None:
         if not self.learner:
@@ -247,38 +239,6 @@ class Orchestrator:
             if changes:
                 self.emit("files", {"files": files, "stage": f"dimension:{persona.name}"})
         return files
-
-    def review_loop(
-        self,
-        requirement: str,
-        plan: dict[str, Any],
-        files: dict[str, str],
-        lessons: dict[str, list[str]],
-        trace: RunTrace,
-    ) -> RunResult:
-        best: Snapshot | None = None
-        for iteration in range(1, self.config.max_iterations + 1):
-            self.status(f"Review iteration {iteration}/{self.config.max_iterations}")
-            # Verify first so reviewers see test failures in project memory; on failure the fixer gets one try.
-            verified = self.config.skip_verify or self.verify(plan, files, trace)
-            if not verified:
-                files, verified = self.fix(requirement, plan, files, lessons, trace)
-            reviews = self.review_round(self.review_coordinator, requirement, plan, files, iteration)
-            passed = verified and not any(is_failing(r, self.config.passing_score) for r in reviews)
-            snapshot = Snapshot(iteration, files, reviews, verified, passed)
-            if best is None or snapshot.rank > best.rank:
-                best = snapshot
-            if passed:
-                self.status("All quality gates passed.")
-                return RunResult(files=files, plan=plan, reviews=reviews, passed=True)
-            if iteration < self.config.max_iterations:
-                files = self.apply_patches(files, reviews, trace)
-
-        assert best is not None  # max_iterations >= 1
-        if best.files is not files:
-            self.emit("files", {"files": best.files, "stage": f"best:iteration {best.iteration}"})
-        self.status(f"Max iterations reached. Returning the best reviewed version (iteration {best.iteration}).")
-        return RunResult(files=best.files, plan=plan, reviews=best.reviews, passed=False)
 
     def review_round(
         self,

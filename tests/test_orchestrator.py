@@ -104,3 +104,39 @@ def test_returns_best_reviewed_version_when_gates_never_pass() -> None:
     assert not result.passed
     assert all(review["score"] == 70 for review in result.reviews)
     assert any(kind == "files" and data["stage"] == "best:iteration 1" for kind, data in events)
+
+
+def node_path(events: list[tuple[str, dict]]) -> list[str]:
+    return [data["node"] for kind, data in events if kind == "node"]
+
+
+def test_langgraph_walks_the_full_pipeline() -> None:
+    orchestrator, events = make(FakeLLM())
+    orchestrator.run("make an adder")
+    assert node_path(events) == [
+        "recall", "context", "plan", "build", "implement",
+        "verify", "review", "patch",  # round 1 fails review, patches
+        "verify", "review", "finish", "learn",  # round 2 passes
+    ]
+
+
+def test_langgraph_fast_mode_and_fix_branch() -> None:
+    class Broken(FakeLLM):
+        def ask_json(self, system_prompt: str, user_prompt: str, label: str, temperature: float | None = None) -> dict[str, Any]:
+            if label == "Generator":
+                return {"files": {"app.py": "def add(a, b:\n    return a + b\n"}}
+            return super().ask_json(system_prompt, user_prompt, label)
+
+    orchestrator, events = make(Broken(), fast_mode=True, max_iterations=1)
+    orchestrator.run("make an adder")
+    path = node_path(events)
+    assert "implement" not in path
+    assert path[path.index("verify") + 1] == "fix"
+    assert path[-2:] == ["finish", "learn"]
+
+
+def test_pipeline_diagram_lists_every_node() -> None:
+    from agent_platform.graph import NODES, pipeline_diagram
+
+    diagram = pipeline_diagram()
+    assert all(node in diagram for node in NODES)
