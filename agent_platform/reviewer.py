@@ -5,13 +5,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Protocol
 
 from .dimensions import find_dimension_plan
-from .llm import OllamaClient, RunCancelled
+from .llm import LLMClient, RunCancelled
 from .models import Persona
 from .retriever import RetrieverAgent
 
 
 class ReviewerAgent:
-    def __init__(self, llm: OllamaClient, persona: Persona) -> None:
+    def __init__(self, llm: LLMClient, persona: Persona) -> None:
         self.llm = llm
         self.persona = persona
 
@@ -103,7 +103,7 @@ class Reviewer(Protocol):
 class ReviewCoordinator:
     def __init__(
         self,
-        llm: OllamaClient,
+        llm: LLMClient,
         personas: tuple[Persona, ...],
         retriever: RetrieverAgent,
         remote_reviewers: list[Reviewer] | None = None,

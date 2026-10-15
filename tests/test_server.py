@@ -20,7 +20,7 @@ from tests.fakes import FakeLLM
 
 @pytest.fixture()
 def base_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
-    def fake_orchestrator(config: Any, emit: Any, cancel_event: threading.Event) -> Orchestrator:
+    def fake_orchestrator(config: Any, emit: Any, cancel_event: threading.Event, **_: Any) -> Orchestrator:
         llm = FakeLLM()
         llm.cancel_event = cancel_event
         return Orchestrator(config, emit=emit, llm=llm)
@@ -105,3 +105,50 @@ def test_rejects_bad_requests(base_url: str) -> None:
     assert cross_origin[0] == 403
     form_post = request(base_url + "/api/runs", {"requirement": "x"}, {"Content-Type": "text/plain"})
     assert form_post[0] == 415
+
+
+def test_settings_round_trip_masks_keys(base_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from agent_platform import settings as settings_module
+
+    monkeypatch.setattr(settings_module, "SETTINGS_FILE", tmp_path / "settings.json")
+    providers = {"openai": {"type": "openai", "base_url": "https://api.openai.com/v1", "api_key": "sk-test-secret-4321"}}
+    status, saved = request(
+        base_url + "/api/settings",
+        {"providers_json": json.dumps(providers), "model": "openai:gpt-5-mini", "reviewer_model": "ollama:qwen3:4b"},
+    )
+    assert status == 200
+    assert "sk-test-secret" not in json.dumps(saved)
+    assert saved["config"]["model"] == "openai:gpt-5-mini"
+    assert saved["providers"]["openai"]["has_key"] is True
+    _, config = request(base_url + "/api/config")
+    assert "sk-test-secret" not in json.dumps(config)
+    assert request(base_url + "/api/settings", {"providers_json": "{bad"})[0] == 400
+    # Per-run settings may not redirect where API keys are sent.
+    assert request(base_url + "/api/runs", {"requirement": "x", "settings": {"providers_json": "{}"}})[0] == 400
+
+
+def test_memory_and_learning_endpoints(base_url: str, tmp_path: Path) -> None:
+    status, run = request(base_url + "/api/runs", {"requirement": "make an adder library"})
+    read_events(f"{base_url}/api/runs/{run['id']}/events")
+    _, memory = request(base_url + "/api/memory?limit=100")
+    assert memory["backend"] == "sqlite" and memory["count"] >= 1
+    lesson = next(item for item in memory["items"] if item["kind"] == "lesson")
+    _, found = request(base_url + "/api/memory?q=adder%20library")
+    assert found["items"] and found["items"][0]["similarity"] > 0
+    assert request(base_url + "/api/memory/delete", {"id": lesson["id"]})[0] == 200
+    _, after = request(base_url + "/api/memory?limit=200")
+    assert lesson["id"] not in {item["id"] for item in after["items"]}
+
+    _, learning = request(base_url + "/api/learning")
+    assert set(learning["strategies"]) == {"focused", "thorough", "test_first"}
+    assert any(row["pulls"] >= 1 for row in learning["stats"])
+    assert request(base_url + "/api/memory?limit=x")[0] == 400
+
+
+def test_models_and_health_endpoints(base_url: str) -> None:
+    assert request(base_url + "/api/models?provider=nope")[0] == 400
+    assert request(base_url + "/api/models/pull", {"model": "openai:gpt-5-mini"})[0] == 400
+    assert request(base_url + "/api/models/pull", {})[0] == 400
+    status, health = request(base_url + "/api/health")
+    assert status == 200 and {"ok", "git", "models", "memory", "embedding"} <= set(health)
+    assert health["models"][0]["roles"] == ["planner", "coder", "reviewer", "critic"]

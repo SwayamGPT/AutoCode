@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from .a2a_client import A2A_PATH, A2A_PROTOCOL_VERSION
 from .models import PipelineConfig
@@ -136,8 +136,8 @@ def parse_message(message: Any) -> tuple[str, dict[str, Any]]:
 
 
 class A2AServer:
-    def __init__(self, base_config: PipelineConfig, store: RunStore, settings_parser: Any) -> None:
-        self.base_config = base_config
+    def __init__(self, get_config: Callable[[], PipelineConfig], store: RunStore, settings_parser: Any) -> None:
+        self.get_config = get_config
         self.store = store
         self.settings_parser = settings_parser
 
@@ -175,7 +175,7 @@ class A2AServer:
             raise RpcError(INVALID_PARAMS, "Send the requirement as a text part")
         settings = options.get("settings") or {}
         try:
-            config = self.settings_parser(self.base_config, settings if isinstance(settings, dict) else {})
+            config = self.settings_parser(self.get_config(), settings if isinstance(settings, dict) else {})
         except ValueError as exc:
             raise RpcError(INVALID_PARAMS, str(exc)) from exc
         run = Run(

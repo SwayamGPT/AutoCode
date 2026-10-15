@@ -7,7 +7,7 @@ import pytest
 from agent_platform.config import config_from_env
 from agent_platform.llm import RunCancelled
 from agent_platform.orchestrator import Orchestrator
-from tests.fakes import FakeLLM
+from tests.fakes import FakeLLM, is_review_call
 
 
 def make(llm: FakeLLM, **overrides: Any) -> tuple[Orchestrator, list[tuple[str, dict]]]:
@@ -92,9 +92,9 @@ def test_fast_mode_skips_dimension_implementation() -> None:
 
 def test_returns_best_reviewed_version_when_gates_never_pass() -> None:
     class Declining(FakeLLM):
-        def ask_json(self, system_prompt: str, user_prompt: str, label: str) -> dict[str, Any]:
+        def ask_json(self, system_prompt: str, user_prompt: str, label: str, temperature: float | None = None) -> dict[str, Any]:
             result = super().ask_json(system_prompt, user_prompt, label)
-            if label.startswith(("Plan: ", "Implement: ")) or label in {"Planner", "Generator"}:
+            if not is_review_call(label):
                 return result
             first_round = sum(1 for c in self.calls if c == label) == 1
             return {**result, "score": 70 if first_round else 40, "status": "needs_work"}

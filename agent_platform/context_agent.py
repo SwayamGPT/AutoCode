@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from .llm import OllamaClient
+from .llm import LLMClient
 from .mcp_client import McpClient, McpError, load_mcp_servers
 
 MAX_TOOL_CALLS = 3
@@ -30,7 +30,7 @@ JSON schema:
 class ContextAgent:
     def __init__(
         self,
-        llm: OllamaClient,
+        llm: LLMClient,
         config_path: str,
         timeout_seconds: float,
         emit: Callable[[str, dict[str, Any]], None],

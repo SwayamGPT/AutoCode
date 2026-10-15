@@ -11,7 +11,7 @@ import json
 from typing import Any, Callable
 
 from .generator import context_files
-from .llm import OllamaClient, normalize_files
+from .llm import LLMClient, normalize_files
 from .models import Persona
 
 MAX_ITEMS = 8
@@ -108,7 +108,7 @@ def find_dimension_plan(plan: dict[str, Any], name: str) -> dict[str, Any] | Non
 
 
 class DimensionPlanner:
-    def __init__(self, llm: OllamaClient, personas: tuple[Persona, ...]) -> None:
+    def __init__(self, llm: LLMClient, personas: tuple[Persona, ...]) -> None:
         self.llm = llm
         self.personas = personas
 
@@ -119,7 +119,9 @@ class DimensionPlanner:
         existing_paths: list[str],
         context: str,
         on_step: Callable[[int, dict[str, Any]], None],
+        lessons: dict[str, list[str]] | None = None,
     ) -> list[dict[str, Any]]:
+        lessons = lessons or {}
         plans: list[dict[str, Any]] = []
         for step, persona in enumerate(self.personas, start=1):
             system_prompt = PLAN_SYSTEM_PROMPT.format(
@@ -133,6 +135,9 @@ class DimensionPlanner:
             )
             if context:
                 user_prompt += f"\nContext gathered from tools:\n{context}\n"
+            if lessons.get(persona.name):
+                recalled = "\n".join(f"- {lesson}" for lesson in lessons[persona.name])
+                user_prompt += f"\nLessons from similar past tasks for {persona.name}:\n{recalled}\n"
             try:
                 raw = self.llm.ask_json(system_prompt, user_prompt, f"Plan: {persona.name}")
                 dimension_plan = normalize_dimension_plan(persona, raw)
@@ -144,7 +149,7 @@ class DimensionPlanner:
 
 
 class DimensionImplementer:
-    def __init__(self, llm: OllamaClient) -> None:
+    def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
 
     def run(
@@ -154,6 +159,8 @@ class DimensionImplementer:
         plan: dict[str, Any],
         dimension_plan: dict[str, Any],
         files: dict[str, str],
+        strategy: dict[str, Any] | None = None,
+        lessons: str = "",
     ) -> tuple[dict[str, str], str]:
         """Returns (changed files, summary). Raises ValueError when the model output is unusable."""
         priority = [item["path"] for item in dimension_plan["files"]]
@@ -163,8 +170,13 @@ class DimensionImplementer:
             f"Your dimension plan:\n{json.dumps(dimension_plan, indent=2)}\n\n"
             f"Current files:\n{json.dumps(context_files(priority, files, IMPLEMENT_CONTEXT_CHARS), indent=2)}\n"
         )
+        if strategy:
+            user_prompt += f"\nApproach: {strategy['instruction']}\n"
+        if lessons:
+            user_prompt += f"\nLessons from similar past tasks:\n{lessons}\n"
         system_prompt = IMPLEMENT_SYSTEM_PROMPT.format(name=persona.name, mission=persona.mission)
-        payload = self.llm.ask_json(system_prompt, user_prompt, f"Implement: {persona.name}")
+        temperature = strategy["temperature"] if strategy else None
+        payload = self.llm.ask_json(system_prompt, user_prompt, f"Implement: {persona.name}", temperature)
         changed = {
             path: content
             for path, content in normalize_files(payload.get("files", {})).items()

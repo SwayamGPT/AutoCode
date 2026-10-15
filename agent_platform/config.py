@@ -25,6 +25,14 @@ DEFAULTS = {
     "MCP_CONFIG": str(CONFIG_HOME / "mcp.json"),
     "A2A_PEERS": "",
     "FAST_MODE": "false",
+    "PROVIDERS_JSON": "",
+    "PLANNER_MODEL": "",
+    "CODER_MODEL": "",
+    "REVIEWER_MODEL": "",
+    "CRITIC_MODEL": "",
+    "EMBEDDING_MODEL": "ollama:nomic-embed-text",
+    "DATABASE_URL": "",
+    "LEARNING": "true",
 }
 
 
@@ -63,7 +71,8 @@ def parse_bool(value: str) -> bool:
 
 def config_from_env() -> PipelineConfig:
     return PipelineConfig(
-        model=env_value("OLLAMA_MODEL", str),
+        # MODEL takes any "<provider>:<model>" spec; OLLAMA_MODEL is kept for older .env files.
+        model=os.environ.get("MODEL") or env_value("OLLAMA_MODEL", str),
         ollama_host=env_value("OLLAMA_HOST", str),
         ollama_request_timeout_seconds=env_value("OLLAMA_REQUEST_TIMEOUT_SECONDS", int),
         temperature=env_value("LLM_TEMPERATURE", float),
@@ -76,4 +85,12 @@ def config_from_env() -> PipelineConfig:
         mcp_config=env_value("MCP_CONFIG", str),
         a2a_peers=env_value("A2A_PEERS", str),
         fast_mode=env_value("FAST_MODE", parse_bool),
+        providers_json=env_value("PROVIDERS_JSON", str),
+        planner_model=env_value("PLANNER_MODEL", str),
+        coder_model=env_value("CODER_MODEL", str),
+        reviewer_model=env_value("REVIEWER_MODEL", str),
+        critic_model=env_value("CRITIC_MODEL", str),
+        embedding_model=env_value("EMBEDDING_MODEL", str),
+        database_url=env_value("DATABASE_URL", str),
+        learning=env_value("LEARNING", parse_bool),
     )

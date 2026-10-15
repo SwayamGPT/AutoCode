@@ -15,7 +15,9 @@ PATCH = """--- a/app.py
 
 
 def is_review_call(label: str) -> bool:
-    return label not in {"Planner", "Generator", "Context Agent"} and not label.startswith(("Plan: ", "Implement: "))
+    return label not in {"Planner", "Generator", "Context Agent", "Reflect", "Fix"} and not label.startswith(
+        ("Plan: ", "Implement: ")
+    )
 
 
 def dimension_plan(name: str) -> dict[str, Any]:
@@ -40,7 +42,7 @@ def implementation(name: str) -> dict[str, Any]:
 
 
 class FakeLLM:
-    """Scripted stand-in for OllamaClient: plans one file, every reviewer passes after one patch round."""
+    """Scripted stand-in for LLMClient: plans one file, every reviewer passes after one patch round."""
 
     def __init__(self, review_score: int = 90, patch: bool = True) -> None:
         self.review_score = review_score
@@ -53,13 +55,25 @@ class FakeLLM:
     def ensure_ready(self) -> None:
         pass
 
-    def ask_json(self, system_prompt: str, user_prompt: str, label: str) -> dict[str, Any]:
+    def ask_json(
+        self, system_prompt: str, user_prompt: str, label: str, temperature: float | None = None
+    ) -> dict[str, Any]:
         if self.cancel_event.is_set():
             raise RunCancelled()
         with self.lock:
             self.calls.append(label)
             self.prompts[label] = user_prompt
             reviews_so_far = sum(1 for call in self.calls if is_review_call(call))
+        if label == "Reflect":
+            return {
+                "summary": "Adder built; maintainability needed a docstring.",
+                "lessons": [
+                    {"dimension": "Maintainability", "step": "implement", "lesson": "Add docstrings to public functions."},
+                    {"dimension": "General", "step": "fix", "lesson": "Run the compile check before review."},
+                ],
+            }
+        if label == "Fix":
+            return {"diagnosis": "Syntax error in app.py.", "files": {"app.py": "def add(a, b):\n    return a + b\n"}}
         if label.startswith("Plan: "):
             return dimension_plan(label.removeprefix("Plan: "))
         if label.startswith("Implement: "):

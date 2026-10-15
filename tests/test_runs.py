@@ -17,7 +17,7 @@ from tests.fakes import FakeLLM
 
 @pytest.fixture(autouse=True)
 def fake_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_orchestrator(config: Any, emit: Any, cancel_event: threading.Event) -> Orchestrator:
+    def fake_orchestrator(config: Any, emit: Any, cancel_event: threading.Event, **_: Any) -> Orchestrator:
         llm = FakeLLM()
         llm.cancel_event = cancel_event
         return Orchestrator(config, emit=emit, llm=llm)

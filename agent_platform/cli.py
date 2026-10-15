@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import config_from_env, load_env_files
 from .logs import setup_logging
+from .settings import apply_saved_settings
 from .models import PipelineConfig
 from .orchestrator import Orchestrator
 from .workspace import changed_files, file_diff, load_workspace, write_project
@@ -75,7 +76,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
     load_env_files()
     setup_logging()
-    env_config = config_from_env()
+    # Environment and .env give the defaults; settings saved from the app override them.
+    env_config = apply_saved_settings(config_from_env())
 
     # The packaged app (and `python app.py desktop`) opens the desktop window.
     if argv[:1] == ["desktop"] or (not argv and getattr(sys, "frozen", False)):

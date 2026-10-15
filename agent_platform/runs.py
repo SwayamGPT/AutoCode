@@ -90,7 +90,7 @@ class Run:
     def execute(self) -> None:
         logger.info("run=%s started mode=%s model=%s workspace=%r", self.id, self.mode, self.config.model, self.workspace)
         try:
-            orchestrator = Orchestrator(self.config, emit=self.emit, cancel_event=self.cancel_event)
+            orchestrator = Orchestrator(self.config, emit=self.emit, cancel_event=self.cancel_event, run_id=self.id)
             if self.mode == "review":
                 self.passed, _ = orchestrator.review(self.requirement, self.original)
             else:

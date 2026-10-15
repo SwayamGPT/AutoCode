@@ -27,6 +27,16 @@ class PipelineConfig:
     mcp_config: str = ""
     a2a_peers: str = ""
     fast_mode: bool = False
+    # Models are "<provider>:<model>" specs (see providers.py); empty role models fall back to `model`.
+    providers_json: str = ""
+    planner_model: str = ""
+    coder_model: str = ""
+    reviewer_model: str = ""
+    critic_model: str = ""
+    embedding_model: str = "ollama:nomic-embed-text"
+    # Memory: empty = SQLite under AUTOCODE_HOME; postgresql://... = Postgres + pgvector.
+    database_url: str = ""
+    learning: bool = True
 
 
 @dataclass(frozen=True)

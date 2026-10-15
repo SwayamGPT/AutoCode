@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .llm import OllamaClient
+from .llm import LLMClient
 
 SYSTEM_PROMPT = """
 You are a practical software architect.
@@ -25,7 +25,7 @@ JSON schema:
 
 
 class PlannerAgent:
-    def __init__(self, llm: OllamaClient) -> None:
+    def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
 
     def run(self, requirement: str, existing_files: dict[str, str] | None = None, context: str = "") -> dict:

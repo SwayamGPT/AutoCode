@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from .llm import OllamaClient, normalize_files
+from .llm import LLMClient, normalize_files
 
 MAX_CONTEXT_CHARS = 24_000
 
@@ -46,7 +46,7 @@ def context_files(
 
 
 class GeneratorAgent:
-    def __init__(self, llm: OllamaClient) -> None:
+    def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
 
     def run(
@@ -56,6 +56,7 @@ class GeneratorAgent:
         existing_files: dict[str, str] | None = None,
         context: str = "",
         focus: str = "",
+        temperature: float | None = None,
     ) -> dict[str, str]:
         existing_files = existing_files or {}
         user_prompt = f"""
@@ -72,5 +73,5 @@ Plan:
             user_prompt += f"\nExisting files:\n{json.dumps(selected, indent=2)}\n"
         if context:
             user_prompt += f"\nContext gathered from tools:\n{context}\n"
-        payload = self.llm.ask_json(SYSTEM_PROMPT, user_prompt, "Generator")
+        payload = self.llm.ask_json(SYSTEM_PROMPT, user_prompt, "Generator", temperature)
         return {**existing_files, **normalize_files(payload.get("files", {}))}

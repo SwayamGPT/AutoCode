@@ -76,7 +76,7 @@ def wait_for_reply(out: Collector, request_id: int) -> dict[str, Any]:
 
 
 def make_server(monkeypatch: pytest.MonkeyPatch) -> tuple[mcp_server.McpServer, Collector]:
-    def fake_orchestrator(config: Any, emit: Any, cancel_event: threading.Event) -> Orchestrator:
+    def fake_orchestrator(config: Any, emit: Any, cancel_event: threading.Event, **_: Any) -> Orchestrator:
         llm = FakeLLM()
         llm.cancel_event = cancel_event
         return Orchestrator(config, emit=emit, llm=llm)

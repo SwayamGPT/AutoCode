@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
 import mimetypes
-import shutil
 import socketserver
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,16 +14,18 @@ from urllib.parse import parse_qs, urlparse
 from .a2a import PARSE_ERROR, A2AServer, agent_card
 from .a2a_client import AGENT_CARD_PATH, peer_name, peer_urls
 from .config import CONFIG_HOME
+from .memory_store import open_store
 from .models import PipelineConfig
 from .personas import PERSONAS
 from .runs import FINISHED, Run, RunStore
+from .services import ModelPulls, check_health, learning_view, list_models, memory_view, presets_view
+from .settings import A2A_LOCKED, RUN_LOCKED, coerce_settings, mask_settings, save_settings, settings_path
 from .workspace import changed_files, load_workspace, write_project
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY_BYTES = 1_000_000
 SSE_HEARTBEAT_SECONDS = 15
-FIELD_TYPES = {"str": str, "int": int, "float": float, "bool": bool}
-HEALTH_TIMEOUT_SECONDS = 3
+MEMORY_PAGE_LIMIT = 200
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 RUNS_DIR = CONFIG_HOME / "runs"
 
@@ -36,41 +37,6 @@ PAGE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
-
-
-def coerce_settings(base: PipelineConfig, settings: dict[str, Any]) -> PipelineConfig:
-    """Apply UI overrides to the base config, coercing each value to the field's declared type."""
-    overrides: dict[str, Any] = {}
-    for field in dataclasses.fields(base):
-        value = settings.get(field.name)
-        if value is None or value == "":
-            continue
-        cast = FIELD_TYPES[str(field.type)]
-        if cast is bool and not isinstance(value, bool):
-            raise ValueError(f"Invalid value for {field.name}: {value!r}")
-        try:
-            overrides[field.name] = cast(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid value for {field.name}: {value!r}") from exc
-    if overrides.get("max_iterations", base.max_iterations) < 1:
-        raise ValueError("max_iterations must be at least 1")
-    return dataclasses.replace(base, **overrides)
-
-
-def check_health(config: PipelineConfig) -> dict[str, Any]:
-    """What the setup banner needs: is Ollama reachable, is the model pulled, is git installed."""
-    from ollama import Client
-
-    health = {"ollama": False, "model": False, "git": shutil.which("git") is not None, "message": ""}
-    client = Client(host=config.ollama_host, timeout=HEALTH_TIMEOUT_SECONDS)
-    try:
-        client.list()
-        health["ollama"] = True
-        client.show(config.model)
-        health["model"] = True
-    except Exception as exc:  # connection refused, 404 model not found, ...
-        health["message"] = str(exc)[:300]
-    return health
 
 
 class LocalHTTPServer(ThreadingHTTPServer):
@@ -91,8 +57,28 @@ class ApiError(Exception):
         self.status = status
 
 
+class AppState:
+    """The effective config (replaced when settings are saved) plus background model downloads."""
+
+    def __init__(self, config: PipelineConfig) -> None:
+        self.lock = threading.Lock()
+        self._config = config
+        self.pulls = ModelPulls()
+
+    @property
+    def config(self) -> PipelineConfig:
+        with self.lock:
+            return self._config
+
+    def update(self, updates: dict[str, Any]) -> PipelineConfig:
+        with self.lock:
+            self._config = save_settings(self._config, updates)
+            return self._config
+
+
 def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPRequestHandler]:
-    a2a = A2AServer(base_config, store, coerce_settings)
+    state = AppState(base_config)
+    a2a = A2AServer(lambda: state.config, store, lambda base, s: coerce_settings(base, s, A2A_LOCKED))
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "AutoCode/1.0"
@@ -181,10 +167,35 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
             run_id = parts[2] if len(parts) > 2 else ""
 
             if route == ("GET", "config"):
-                reviewers = [p.name for p in PERSONAS] + [peer_name(url) for url in peer_urls(base_config)]
-                return self.send_json({"config": dataclasses.asdict(base_config), "personas": reviewers})
+                config = state.config
+                reviewers = [p.name for p in PERSONAS] + [peer_name(url) for url in peer_urls(config)]
+                return self.send_json({"config": mask_settings(config), "personas": reviewers})
+            if route == ("GET", "settings"):
+                return self.send_settings()
+            if route == ("POST", "settings"):
+                try:
+                    state.update(self.read_json())
+                except ValueError as exc:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+                return self.send_settings()
+            if route == ("GET", "models"):
+                return self.send_models((query.get("provider") or ["ollama"])[0])
+            if route == ("GET", "models", "*") and run_id == "pull":
+                return self.send_json({"pulls": state.pulls.snapshot()})
+            if route == ("POST", "models", "*") and run_id == "pull":
+                return self.start_pull(self.read_json())
+            if route == ("GET", "memory"):
+                return self.send_memory(query)
+            if route == ("POST", "memory", "*") and run_id == "delete":
+                return self.delete_memory(self.read_json())
+            if route == ("POST", "memory", "*") and run_id == "clear":
+                self.read_json()
+                open_store(state.config.database_url).clear()
+                return self.send_json({"ok": True})
+            if route == ("GET", "learning"):
+                return self.send_json(learning_view(state.config))
             if route == ("GET", "health"):
-                return self.send_json(check_health(base_config))
+                return self.send_json(check_health(state.config))
             if route == ("GET", "workspace"):
                 return self.browse_workspace((query.get("path") or [""])[0])
             if route == ("GET", "runs"):
@@ -211,6 +222,45 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
                 error = {"code": PARSE_ERROR, "message": f"Parse error: {exc}"}
                 return self.send_json({"jsonrpc": "2.0", "id": None, "error": error})
             self.send_json(a2a.handle(payload))
+
+        def send_settings(self) -> None:
+            config = state.config
+            self.send_json(
+                {"config": mask_settings(config), "providers": presets_view(config), "path": str(settings_path())}
+            )
+
+        def send_models(self, provider: str) -> None:
+            try:
+                self.send_json({"provider": provider, "models": list_models(state.config, provider)})
+            except ValueError as exc:
+                raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+            except Exception as exc:  # provider unreachable or rejected the key
+                raise ApiError(HTTPStatus.BAD_GATEWAY, str(exc)[:300]) from exc
+
+        def start_pull(self, payload: dict[str, Any]) -> None:
+            spec = str(payload.get("model") or "").strip()
+            if not spec:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "model is required")
+            try:
+                self.send_json(state.pulls.start(state.config, spec), HTTPStatus.ACCEPTED)
+            except ValueError as exc:
+                raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+
+        def send_memory(self, query: dict[str, list[str]]) -> None:
+            try:
+                limit = min(int((query.get("limit") or ["50"])[0]), MEMORY_PAGE_LIMIT)
+                offset = max(int((query.get("offset") or ["0"])[0]), 0)
+            except ValueError as exc:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "limit and offset must be integers") from exc
+            self.send_json(memory_view(state.config, (query.get("q") or [""])[0].strip(), limit, offset))
+
+        def delete_memory(self, payload: dict[str, Any]) -> None:
+            try:
+                memory_id = int(payload.get("id"))
+            except (TypeError, ValueError) as exc:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "id must be an integer") from exc
+            open_store(state.config.database_url).delete(memory_id)
+            self.send_json({"ok": True})
 
         def serve_static(self, name: str) -> None:
             root = STATIC_DIR.resolve()
@@ -252,7 +302,7 @@ def make_handler(base_config: PipelineConfig, store: RunStore) -> type[BaseHTTPR
             if not isinstance(settings, dict):
                 raise ApiError(HTTPStatus.BAD_REQUEST, "settings must be an object.")
             try:
-                config = coerce_settings(base_config, settings)
+                config = coerce_settings(state.config, settings, RUN_LOCKED)
                 run = Run(requirement, str(payload.get("workspace") or "").strip(), config)
             except ValueError as exc:
                 raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
