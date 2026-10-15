@@ -118,7 +118,7 @@ code, kbd { font-family: var(--code); font-size: 0.92em; }
 
 /* agent panel */
 .runs { display: flex; gap: 6px; align-items: center; }
-.runs select { padding: 3px 6px; max-width: 220px; font-size: 12px; }
+.runs select { padding: 3px 6px; max-width: 170px; font-size: 12px; }
 .state { margin-left: auto; font-size: 12px; }
 .state.running { color: var(--accent); }
 .state.done { color: var(--add); }
@@ -183,3 +183,26 @@ code, kbd { font-family: var(--code); font-size: 0.92em; }
 @media (prefers-reduced-motion: reduce) {
   .bar .fill { transition: none; }
 }
+
+/* ten-step plan view */
+.dimensions { list-style: none; margin: 0; padding: 12px 20px 24px; max-width: 860px; }
+.dimension { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.dimension.na { opacity: 0.7; }
+.dim-head { display: flex; align-items: baseline; gap: 10px; }
+.dim-head h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.dim-step { font: 500 12px var(--code); color: var(--muted); width: 22px; text-align: right; }
+.dim-stage { margin-left: auto; font-size: 12px; color: var(--muted); }
+.dim-stage.ok { color: var(--add); }
+.dim-stage.bad { color: var(--del); }
+.dim-stage.plain { color: var(--accent); }
+.dim-reason, .dim-summary { margin: 6px 0 0 32px; color: var(--muted); font-size: 13px; }
+.dim-reason.bad { color: var(--del); }
+.dim-body { margin-left: 32px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 24px; }
+.dim-section h4 { margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.dim-section ul { margin: 0; padding-left: 16px; font-size: 13px; }
+.dim-section li { margin: 2px 0; }
+.dim-summary { grid-column: 1 / -1; }
+.link { border: 0; background: none; padding: 0; color: var(--accent); font-family: var(--code); font-size: 12px; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+.metrics { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.metrics + .state { margin-left: 10px; }

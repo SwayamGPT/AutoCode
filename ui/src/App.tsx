@@ -4,6 +4,7 @@ import { ApplyBar } from "./components/ApplyBar";
 import { Composer } from "./components/Composer";
 import { Editor } from "./components/Editor";
 import { FileTree } from "./components/FileTree";
+import { PlanView } from "./components/PlanView";
 import { ReviewerGauge } from "./components/ReviewerGauge";
 import { SetupBanner } from "./components/SetupBanner";
 import { Timeline } from "./components/Timeline";
@@ -13,6 +14,10 @@ import { initialState, reducer } from "./state/run";
 import type { Config, Health, RunSummary, Settings } from "./types";
 
 const STATUS_LABELS = { running: "Working…", done: "Done", error: "Failed", cancelled: "Stopped" } as const;
+
+function formatTokens(count: number): string {
+  return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+}
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -106,6 +111,16 @@ export default function App() {
           diff={state.selected ? state.diffs[state.selected] : undefined}
           view={state.view}
           onView={(view) => dispatch({ type: "view", view })}
+          planView={
+            <PlanView
+              personas={state.personas}
+              plans={state.dimensionPlans}
+              changes={state.dimensionChanges}
+              reviews={state.reviews}
+              passingScore={state.passingScore}
+              onOpenFile={(path) => dispatch({ type: "select", path })}
+            />
+          }
         />
         <section className="pane agent" aria-label="Agent">
           <div className="pane-head">
@@ -120,6 +135,11 @@ export default function App() {
                 ))}
               </select>
             </label>
+            {state.metrics && (
+              <span className="metrics" title="Model calls and tokens used by this run">
+                {state.metrics.llm_calls} calls, {formatTokens(state.metrics.prompt_tokens + state.metrics.output_tokens)} tokens
+              </span>
+            )}
             <span className={`state ${status ?? ""}`} role="status">
               {status ? STATUS_LABELS[status] : ""}
             </span>

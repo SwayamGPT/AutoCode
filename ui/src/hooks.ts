@@ -1,9 +1,8 @@
 import { useEffect, useState, type Dispatch } from "react";
 import { api, desktopBridge } from "./api";
-import type { Action } from "./state/run";
+import { EVENT_KINDS, type Action } from "./state/run";
 import type { RunEvent } from "./types";
 
-const EVENT_KINDS = ["status", "llm_call", "plan", "mcp_call", "files", "review", "scorecard", "patches", "verify", "finished"];
 
 /** Follow a run's server-sent events; replays from the start, so reopening an old run rebuilds its view. */
 export function useRunStream(runId: string | undefined, dispatch: Dispatch<Action>, onFinished: () => void): void {
