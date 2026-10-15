@@ -137,3 +137,23 @@ def test_saved_settings_mask_and_keep_api_keys(tmp_path: Any, monkeypatch: pytes
 
     with pytest.raises(ValueError, match="base_url"):
         save_settings(base, {"providers_json": json.dumps({"x": {"base_url": "file:///etc/passwd"}})})
+
+
+def test_cli_keeps_providers_and_role_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_platform import cli
+
+    seen: dict[str, Any] = {}
+
+    class Recorder:
+        def __init__(self, config: Any) -> None:
+            seen["config"] = config
+
+        def run(self, requirement: str, files: dict[str, str]) -> Any:
+            return type("Result", (), {"files": {}})()
+
+    monkeypatch.setattr(cli, "Orchestrator", Recorder)
+    monkeypatch.setenv("PROVIDERS_JSON", '{"fake": {"type": "openai", "base_url": "http://x/v1"}}')
+    monkeypatch.setenv("REVIEWER_MODEL", "fake:r")
+    cli.main(["make x", "--max-iterations", "3"])
+    config = seen["config"]
+    assert config.reviewer_model == "fake:r" and "fake" in config.providers_json and config.max_iterations == 3

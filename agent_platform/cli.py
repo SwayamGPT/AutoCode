@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 from pathlib import Path
@@ -108,7 +109,10 @@ def main(argv: list[str] | None = None) -> None:
     if not requirement:
         raise SystemExit("No requirement given.")
 
-    config = PipelineConfig(
+    # Flags override only what they name; everything else (providers, role models, memory, learning)
+    # comes from env and saved settings.
+    config = dataclasses.replace(
+        env_config,
         model=args.model,
         ollama_host=args.ollama_host,
         ollama_request_timeout_seconds=args.ollama_request_timeout_seconds,
