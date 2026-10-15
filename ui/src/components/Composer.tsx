@@ -100,6 +100,14 @@ export function Composer({ config, running, onRun, onCancel }: Props) {
           <label className="check">
             <input
               type="checkbox"
+              checked={Boolean(settings.fast_mode)}
+              onChange={(e) => set("fast_mode", e.target.checked)}
+            />
+            Fast mode: one generation pass instead of one per dimension
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
               checked={Boolean(settings.skip_verify)}
               onChange={(e) => set("skip_verify", e.target.checked)}
             />

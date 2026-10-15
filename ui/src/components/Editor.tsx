@@ -1,20 +1,24 @@
+import type { ReactNode } from "react";
+import type { View } from "../state/run";
 import { diffLineClass } from "../state/tree";
 
 interface Props {
   path: string | null;
   content: string | undefined;
   diff: string | undefined;
-  view: "code" | "diff";
-  onView: (view: "code" | "diff") => void;
+  view: View;
+  onView: (view: View) => void;
+  planView: ReactNode;
 }
 
 function Welcome() {
   return (
     <div className="welcome">
-      <h1>Describe what to build. Ten reviewers check it before you see it.</h1>
+      <h1>Describe what to build. Ten dimensions plan it, build it and check it.</h1>
       <p>
-        AutoCode plans the files, writes them, and has ten reviewers score the result. It patches what they flag and
-        runs the tests, then repeats until every reviewer passes. Everything runs on this machine.
+        AutoCode plans the project in ten steps, one per quality dimension from business logic to observability. Each
+        dimension then makes its own code changes, and ten reviewers score the result against those plans. It patches
+        what they flag and runs the tests until everything passes. Everything runs on this machine.
       </p>
       <ol>
         <li>Choose a project folder to change existing code, or leave it empty to start fresh.</li>
@@ -27,8 +31,9 @@ function Welcome() {
   );
 }
 
-export function Editor({ path, content, diff, view, onView }: Props) {
+export function Editor({ path, content, diff, view, onView, planView }: Props) {
   const body = (() => {
+    if (view === "plan") return planView;
     if (!path || content === undefined) return <Welcome />;
     if (view === "diff") {
       if (!diff) return <div className="empty">No changes in this file.</div>;
@@ -59,8 +64,11 @@ export function Editor({ path, content, diff, view, onView }: Props) {
   return (
     <section className="pane editor" aria-label="Editor">
       <div className="pane-head">
-        <span className="path">{path ?? ""}</span>
+        <span className="path">{view === "plan" ? "Ten-step plan" : (path ?? "")}</span>
         <div className="tabs" role="group" aria-label="View">
+          <button type="button" aria-pressed={view === "plan"} onClick={() => onView("plan")}>
+            Plan
+          </button>
           <button type="button" aria-pressed={view === "code"} onClick={() => onView("code")}>
             Code
           </button>

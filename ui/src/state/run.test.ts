@@ -55,6 +55,42 @@ describe("run reducer", () => {
   });
 });
 
+describe("ten-step dimension pipeline", () => {
+  const plan = (dimension: string, applicable = true) => ({
+    dimension,
+    applicable,
+    reason: applicable ? "" : "No data",
+    requirements: ["r"],
+    decisions: [],
+    files: [],
+    acceptance_checks: ["c"],
+  });
+
+  it("starts runs on the plan view and collects dimension plans in order", () => {
+    let state = started();
+    expect(state.view).toBe("plan");
+    state = reducer(state, { type: "event", event: event("dimension_plan", { step: 1, total: 10, plan: plan("Security") }) });
+    state = reducer(state, { type: "event", event: event("dimension_plan", { step: 2, total: 10, plan: plan("Testing", false) }) });
+    expect(state.dimensionPlans.map((p) => p.dimension)).toEqual(["Security", "Testing"]);
+    expect(state.log.at(-1)?.text).toBe("Planned Testing (2/10): not applicable");
+  });
+
+  it("records dimension changes and hides their model calls from the timeline", () => {
+    let state = reducer(started(), { type: "event", event: event("llm_call", { label: "Implement: Security" }) });
+    expect(state.log).toHaveLength(1);
+    const change = { dimension: "Security", step: 2, total: 10, changed: ["auth.py"], skipped: false, summary: "Hashed passwords." };
+    state = reducer(state, { type: "event", event: event("dimension_change", change) });
+    expect(state.dimensionChanges.Security.changed).toEqual(["auth.py"]);
+    expect(state.log.at(-1)?.text).toBe("Security (2/10): Hashed passwords.");
+  });
+
+  it("tracks run metrics from llm_done totals", () => {
+    const totals = { llm_calls: 3, prompt_tokens: 900, output_tokens: 100, llm_seconds: 4 };
+    const state = reducer(started(), { type: "event", event: event("llm_done", { label: "Planner", totals }) });
+    expect(state.metrics).toEqual(totals);
+  });
+});
+
 describe("tree helpers", () => {
   it("nests paths with directories first", () => {
     const tree = buildTree(["z.py", "src/b.py", "src/a.py"]);

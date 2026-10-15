@@ -1,4 +1,4 @@
-import type { LogEntry, Plan, Review, RunEvent, RunSnapshot, RunStatus, Tone } from "../types";
+import type { DimensionChange, DimensionPlan, LogEntry, Metrics, Plan, Review, RunEvent, RunSnapshot, RunStatus, Tone } from "../types";
 
 export interface RunState {
   personas: string[];
@@ -8,12 +8,17 @@ export interface RunState {
   files: Record<string, string>;
   diffs: Record<string, string>;
   selected: string | null;
-  view: "code" | "diff";
+  view: View;
   autoSelect: boolean; // jump to the first changed file when a run's files arrive
   reviews: Record<string, Review>;
+  dimensionPlans: DimensionPlan[];
+  dimensionChanges: Record<string, DimensionChange>;
+  metrics: Metrics | null;
   log: LogEntry[];
   run: { id: string; startedAt: number; status: RunStatus; passed: boolean } | null;
 }
+
+export type View = "code" | "diff" | "plan";
 
 export type Action =
   | { type: "config"; personas: string[]; passingScore: number }
@@ -22,7 +27,7 @@ export type Action =
   | { type: "runOpened"; snapshot: RunSnapshot }
   | { type: "event"; event: RunEvent }
   | { type: "select"; path: string }
-  | { type: "view"; view: "code" | "diff" }
+  | { type: "view"; view: View }
   | { type: "note"; text: string; tone: Tone };
 
 export const initialState: RunState = {
@@ -36,9 +41,32 @@ export const initialState: RunState = {
   view: "code",
   autoSelect: false,
   reviews: {},
+  dimensionPlans: [],
+  dimensionChanges: {},
+  metrics: null,
   log: [],
   run: null,
 };
+
+/** Every event kind the backend emits; useRunStream subscribes to exactly these. */
+export const EVENT_KINDS = [
+  "status",
+  "llm_call",
+  "llm_done",
+  "plan",
+  "dimension_plan",
+  "dimension_change",
+  "mcp_call",
+  "files",
+  "review",
+  "scorecard",
+  "patches",
+  "verify",
+  "finished",
+] as const;
+
+// Dimension planning/implementation calls are reported by their own events; keep the timeline readable.
+const AGENT_STEP_PREFIXES = ["Plan: ", "Implement: "];
 
 let logCounter = 0;
 
@@ -55,6 +83,9 @@ function freshRun(state: RunState, id: string, startedAt: number): RunState {
   return {
     ...state,
     reviews: {},
+    dimensionPlans: [],
+    dimensionChanges: {},
+    metrics: null,
     log: [],
     autoSelect: true,
     run: { id, startedAt, status: "running", passed: false },
@@ -73,13 +104,38 @@ function applyEvent(state: RunState, event: RunEvent): RunState {
       return log(data.message);
     case "llm_call":
       // Reviewer calls show up in the gauge; only list the other agents here.
-      return state.personas.includes(data.label) ? state : log(`Asking model: ${data.label}`, "muted");
+      if (state.personas.includes(data.label) || AGENT_STEP_PREFIXES.some((p) => String(data.label).startsWith(p))) {
+        return state;
+      }
+      return log(`Asking model: ${data.label}`, "muted");
+    case "llm_done":
+      return { ...state, metrics: data.totals as Metrics };
+    case "dimension_plan": {
+      const plan = data.plan as DimensionPlan;
+      const next = log(
+        `Planned ${plan.dimension} (${data.step}/${data.total})${plan.applicable ? "" : ": not applicable"}`,
+        plan.planning_error ? "bad" : "plain",
+      );
+      return { ...next, dimensionPlans: [...state.dimensionPlans.filter((p) => p.dimension !== plan.dimension), plan] };
+    }
+    case "dimension_change": {
+      const change = data as unknown as DimensionChange;
+      const next = log(`${change.dimension} (${change.step}/${change.total}): ${change.summary}`, change.skipped ? "muted" : "plain");
+      return { ...next, dimensionChanges: { ...state.dimensionChanges, [change.dimension]: change } };
+    }
     case "plan": {
       const plan = data.plan as Plan;
+      const withDimensions = { ...state, dimensionPlans: plan.dimensions ?? state.dimensionPlans };
       const files = (plan.files ?? []).map((f) => `${f.path}  ${f.purpose ?? ""}`).join("\n");
-      return log(`Plan: ${plan.summary || "ready"}`, "plain", {
-        detail: `${plan.architecture ?? ""}\n\nFiles:\n${files}\n\nTest: ${plan.test_command || "none"}`,
-      });
+      return {
+        ...withDimensions,
+        log: [
+          ...state.log,
+          entry(`Plan: ${plan.summary || "ready"}`, "plain", ts, {
+            detail: `${plan.architecture ?? ""}\n\nFiles:\n${files}\n\nTest: ${plan.test_command || "none"}`,
+          }),
+        ],
+      };
     }
     case "mcp_call":
       return log(`Tool ${data.server}/${data.tool} ${data.ok ? "returned" : "failed"}`, data.ok ? "plain" : "bad", {
@@ -153,7 +209,8 @@ export function reducer(state: RunState, action: Action): RunState {
         view: "code",
       };
     case "runStarted": {
-      const next = freshRun({ ...state, passingScore: action.passingScore, diffs: {} }, action.id, action.startedAt);
+      // Start on the plan view: the ten dimension plans are the first thing a run produces.
+      const next = freshRun({ ...state, passingScore: action.passingScore, diffs: {}, view: "plan" }, action.id, action.startedAt);
       return { ...next, log: [entry(action.requirement, "plain", action.startedAt, { emphasis: true })] };
     }
     case "runOpened": {
@@ -166,6 +223,7 @@ export function reducer(state: RunState, action: Action): RunState {
           files: snapshot.files,
           diffs: snapshot.diffs,
           selected: null,
+          view: "plan",
         },
         snapshot.id,
         snapshot.created_at,
@@ -177,7 +235,7 @@ export function reducer(state: RunState, action: Action): RunState {
       return {
         ...state,
         selected: action.path,
-        view: state.view === "diff" && !state.diffs[action.path] ? "code" : state.view,
+        view: state.view === "code" || (state.view === "diff" && state.diffs[action.path]) ? state.view : state.diffs[action.path] ? "diff" : "code",
       };
     case "view":
       return { ...state, view: action.view };
